@@ -1,0 +1,4 @@
+Processing sheet: Organized
+Found 24 rows in sheet
+Headers: [Line Num Heading Role Location Organization Start Date End Date Description]
+Successfully converted sample_data/demo_mavgo_flight/History.xlsx to test_history.db
