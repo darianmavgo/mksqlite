@@ -3,22 +3,21 @@ package main
 import (
 	"fmt"
 	"io"
+	"mksqlite/pkg/converters"
 	"os"
 	"path/filepath"
-
-	"mksqlite/pkg/parsers"
 )
 
 // FileToSQLite converts a file to SQLite using the appropriate converter
 func FileToSQLite(inputPath, outputPath string) error {
 	ext := filepath.Ext(inputPath)
-	var converter parsers.FileConverter
+	var converter converters.FileConverter
 
 	switch ext {
 	case ".csv":
-		converter = &parsers.CSVConverter{}
+		converter = &converters.CSVConverter{}
 	case ".xlsx", ".xls":
-		converter = &parsers.ExcelConverter{}
+		converter = &converters.ExcelConverter{}
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
@@ -67,11 +66,11 @@ func main() {
 // exportToSQL exports a file as SQL statements to writer
 func exportToSQL(inputPath string, writer io.Writer) error {
 	ext := filepath.Ext(inputPath)
-	var converter parsers.StreamConverter
+	var converter converters.StreamConverter
 
 	switch ext {
 	case ".csv":
-		converter = &parsers.CSVConverter{}
+		converter = &converters.CSVConverter{}
 	case ".xlsx", ".xls":
 		fmt.Printf("Excel SQL export not yet implemented\n")
 		return fmt.Errorf("Excel SQL export not yet implemented")

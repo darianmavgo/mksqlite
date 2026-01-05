@@ -1,4 +1,4 @@
-package parsers
+package converters
 
 import "io"
 

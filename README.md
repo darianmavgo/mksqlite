@@ -1,10 +1,23 @@
 # mksqlite
 
+![Go Version](https://img.shields.io/badge/Go-1.25-blue)
+
 A library and command-line tool to convert files to SQLite databases with generalized I/O support.
 
 ## Version 1
 
 Supports converting CSV and Excel files to SQLite databases or SQL export.
+
+## Installation
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd mksqlite
+
+# Build the CLI
+go build ./cmd/mksqlite
+```
 
 ## Usage
 
@@ -19,6 +32,34 @@ go build ./cmd/mksqlite
 # Export files as SQL statements (to stdout)
 ./mksqlite --sql input.csv
 ./mksqlite --sql input.xlsx  # Not yet implemented for Excel
+```
+
+## Examples
+
+### Converting Sample Data
+
+Using the included sample files:
+
+```bash
+# Convert CSV to SQLite database
+./mksqlite sample_data/sample.csv sample.db
+
+# View the created database (requires sqlite3 CLI)
+sqlite3 sample.db "SELECT * FROM sample;"
+
+# Export CSV as SQL statements
+./mksqlite --sql sample_data/sample.csv
+```
+
+### Sample CSV Content
+
+The `sample_data/sample.csv` contains:
+
+```
+Name,Age,City
+John,25,New York
+Jane,30,London
+Bob,35,Paris
 ```
 
 ## Features
