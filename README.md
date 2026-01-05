@@ -6,6 +6,8 @@ A library and command-line tool to convert files to SQLite databases with genera
 
 ## Version 1
 
+mksqlite was born from Mavgo Flight.  Realizing that just a library that converts a file type or data format into sqlite is valuable by itself independent of super useful URLs and web browsing. 
+The goal is to first duplicate the code specific to conversion then upgrade it, then expand it. Then use this resulting library in Mavgo Flight and other tools. 
 Supports converting CSV and Excel files to SQLite databases or SQL export.
 
 ## Installation
