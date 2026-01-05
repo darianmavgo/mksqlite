@@ -1,4 +1,4 @@
-package parsers
+package converters
 
 import (
 	"database/sql"
@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/xuri/excelize/v2"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/xuri/excelize/v2"
 )
 
 // ExcelConverter converts Excel files to SQLite tables
@@ -104,7 +104,7 @@ func (e *ExcelConverter) ConvertFile(inputPath, outputPath string) error {
 			values[i] = val
 		}
 
-			_, err = stmt.Exec(values...)
+		_, err = stmt.Exec(values...)
 		if err != nil {
 			return fmt.Errorf("failed to insert row: %w", err)
 		}

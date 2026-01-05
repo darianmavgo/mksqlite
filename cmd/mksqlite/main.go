@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
-	"mksqlite/pkg/converters"
+	"mksqlite/converters"
 	"os"
 	"path/filepath"
 )
