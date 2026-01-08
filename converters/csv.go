@@ -55,14 +55,17 @@ func (c *CSVConverter) convertCSVToSQLite(reader io.Reader, dbPath string) error
 	defer db.Close()
 
 	// Create table
-	createTableSQL := buildCreateTableSQL(headers)
+	createTableSQL := GenCreateTableSQL("data", headers)
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
 		return fmt.Errorf("failed to create table: %w", err)
 	}
 
 	// Prepare insert statement
-	insertSQL := buildInsertSQL(headers)
+	insertSQL, err := GenPreparedStmt("data", headers, InsertStmt)
+	if err != nil {
+		return fmt.Errorf("failed to generate insert statement: %w", err)
+	}
 	stmt, err := db.Prepare(insertSQL)
 	if err != nil {
 		return fmt.Errorf("failed to prepare insert statement: %w", err)
@@ -85,42 +88,7 @@ func (c *CSVConverter) convertCSVToSQLite(reader io.Reader, dbPath string) error
 	return nil
 }
 
-// sanitizeColumnName converts a header to a valid SQL column name
-func sanitizeColumnName(header string) string {
-	// Replace spaces and special characters with underscores
-	result := strings.ReplaceAll(header, " ", "_")
-	result = strings.ReplaceAll(result, "-", "_")
-	result = strings.ReplaceAll(result, ".", "_")
-	// Remove other special characters
-	for _, char := range []string{"(", ")", "[", "]", "{", "}", "!", "@", "#", "$", "%", "^", "&", "*", "+", "=", "|", "\\", "/", "?", "<", ">", ",", ":", ";", "'", "\""} {
-		result = strings.ReplaceAll(result, char, "")
-	}
 
-	// Ensure column name doesn't start with a digit (invalid in SQL)
-	if len(result) > 0 && result[0] >= '0' && result[0] <= '9' {
-		result = "col_" + result
-	}
-
-	// Ensure it's not empty
-	if result == "" {
-		result = "column"
-	}
-
-	return result
-}
-
-// buildCreateTableSQL builds the CREATE TABLE statement
-func buildCreateTableSQL(columns []string) string {
-	sql := "CREATE TABLE data ("
-	for i, col := range columns {
-		sql += fmt.Sprintf("%s TEXT", col)
-		if i < len(columns)-1 {
-			sql += ", "
-		}
-	}
-	sql += ")"
-	return sql
-}
 
 // parseCSV reads CSV data from reader and returns sanitized headers and rows
 func parseCSV(reader io.Reader) ([]string, [][]string, error) {
@@ -139,10 +107,7 @@ func parseCSV(reader io.Reader) ([]string, [][]string, error) {
 	}
 
 	// Sanitize headers for SQL column names
-	sanitizedHeaders := make([]string, len(filteredHeaders))
-	for i, header := range filteredHeaders {
-		sanitizedHeaders[i] = sanitizeColumnName(header)
-	}
+	sanitizedHeaders := GenColumnNames(filteredHeaders)
 
 	// Read all rows
 	var rows [][]string
@@ -175,7 +140,7 @@ func parseCSV(reader io.Reader) ([]string, [][]string, error) {
 // writeSQL writes SQL DDL and DML statements to writer
 func writeSQL(headers []string, rows [][]string, writer io.Writer) error {
 	// Write CREATE TABLE statement
-	createTableSQL := buildCreateTableSQL(headers)
+	createTableSQL := GenCreateTableSQL("data", headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
@@ -234,16 +199,4 @@ func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 	return writeSQL(headers, rows, writer)
 }
 
-// buildInsertSQL builds the INSERT statement
-func buildInsertSQL(columns []string) string {
-	sql := "INSERT INTO data ("
-	sql += strings.Join(columns, ", ")
-	sql += ") VALUES ("
-	placeholders := make([]string, len(columns))
-	for i := range placeholders {
-		placeholders[i] = "?"
-	}
-	sql += strings.Join(placeholders, ", ")
-	sql += ")"
-	return sql
-}
+

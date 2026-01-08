@@ -58,10 +58,7 @@ func (e *ExcelConverter) ConvertFile(inputPath, outputPath string) error {
 	dataRows := rows[1:]
 
 	// Sanitize headers for SQL column names
-	sanitizedHeaders := make([]string, len(headers))
-	for i, header := range headers {
-		sanitizedHeaders[i] = sanitizeColumnName(header)
-	}
+	sanitizedHeaders := GenColumnNames(headers)
 
 	// Connect to SQLite database
 	db, err := sql.Open("sqlite3", outputPath)
@@ -71,14 +68,17 @@ func (e *ExcelConverter) ConvertFile(inputPath, outputPath string) error {
 	defer db.Close()
 
 	// Create table
-	createTableSQL := buildCreateTableSQL(sanitizedHeaders)
+	createTableSQL := GenCreateTableSQL("data", sanitizedHeaders)
 	_, err = db.Exec(createTableSQL)
 	if err != nil {
 		return fmt.Errorf("failed to create table: %w", err)
 	}
 
 	// Prepare insert statement
-	insertSQL := buildInsertSQL(sanitizedHeaders)
+	insertSQL, err := GenPreparedStmt("data", sanitizedHeaders, InsertStmt)
+	if err != nil {
+		return fmt.Errorf("failed to generate insert statement: %w", err)
+	}
 	stmt, err := db.Prepare(insertSQL)
 	if err != nil {
 		return fmt.Errorf("failed to prepare insert statement: %w", err)

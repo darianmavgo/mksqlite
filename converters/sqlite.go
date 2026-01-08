@@ -166,3 +166,17 @@ WHERE id = ?`,
 
 	return stmtSQL, nil
 }
+
+// GenCreateTableSQL generates a CREATE TABLE SQL statement
+func GenCreateTableSQL(tableName string, columnNames []string) string {
+	colTypes := GenColumnTypes(columnNames)
+	sql := "CREATE TABLE " + tableName + " ("
+	for i, name := range columnNames {
+		sql += name + " " + colTypes[i]
+		if i < len(columnNames)-1 {
+			sql += ", "
+		}
+	}
+	sql += ")"
+	return sql
+}
