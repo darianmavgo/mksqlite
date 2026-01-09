@@ -31,6 +31,8 @@ func FileToSQLite(inputPath, outputPath string) error {
 		converter = &converters.ExcelConverter{}
 	case ".zip":
 		converter = &converters.ZipConverter{}
+	case ".html", ".htm":
+		converter = &converters.HTMLConverter{}
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
@@ -106,6 +108,8 @@ func exportToSQL(inputPath string, writer io.Writer) error {
 	case ".zip":
 		fmt.Printf("Zip SQL export not yet implemented\n")
 		return fmt.Errorf("Zip SQL export not yet implemented")
+	case ".html", ".htm":
+		converter = &converters.HTMLConverter{}
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
