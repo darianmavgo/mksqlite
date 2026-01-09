@@ -18,6 +18,8 @@ func FileToSQLite(inputPath, outputPath string) error {
 		converter = &converters.CSVConverter{}
 	case ".xlsx", ".xls":
 		converter = &converters.ExcelConverter{}
+	case ".zip":
+		converter = &converters.ZipConverter{}
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
@@ -74,6 +76,9 @@ func exportToSQL(inputPath string, writer io.Writer) error {
 	case ".xlsx", ".xls":
 		fmt.Printf("Excel SQL export not yet implemented\n")
 		return fmt.Errorf("Excel SQL export not yet implemented")
+	case ".zip":
+		fmt.Printf("Zip SQL export not yet implemented\n")
+		return fmt.Errorf("Zip SQL export not yet implemented")
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
