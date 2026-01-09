@@ -1,3 +1,4 @@
+// DO NOT MODIFY: This file is finalized. Any changes should be discussed and approved.
 package converters
 
 import (
@@ -26,6 +27,14 @@ var (
 	reg   = regexp.MustCompile(`[^a-zA-Z0-9 _]+`)
 )
 
+/*
+	GenCompliantNames generates names that can be used sqlite.
+
+The rules for column names and table names are so similar I made one function
+that taxes a prefix as input. lower case, snake case, strip disallowed characters.
+Still need to add logic dodging sqlite keywords.
+If a standardized name results in an  unusable result then the name is {prefix}{idx}
+*/
 func GenCompliantNames(rawnames []string, prefix string) []string {
 	gorgeous := make([]string, len(rawnames))
 
@@ -33,32 +42,20 @@ func GenCompliantNames(rawnames []string, prefix string) []string {
 	for idx, item := range rawnames {
 		item = strings.TrimSpace(item)
 		item = reg.ReplaceAllString(item, "")
-		item = space.ReplaceAllString((item), "_")
+		item = space.ReplaceAllString(item, "_")
 		item = strings.ToLower(item)
 
 		// If stripping non-compliant chars leaves us with nothing, give it a default index name
 		if len(item) == 0 {
-			item = fmt.Sprintf("%s%d", prefix, idx)
+			gorgeous[idx] = fmt.Sprintf("%s%d", prefix, idx)
+			continue
 		}
 
-		// Now check for duplicates
 		counter[item]++
-		switch {
-		case counter[item] == 1:
-			// normal and ready.
-			gorgeous[idx] = strings.ToLower(item)
-		case counter[item] > 1:
-			// duplicate found, will need to rename.
-			gorgeous[idx] = fmt.Sprintf("%s%d_%s", prefix, idx, item)
-		}
-		if len(item) > 0 && counter[item] < 2 {
-			if strings.HasPrefix(strings.ToLower(item), prefix) {
-				gorgeous[idx] = strings.ToLower(item)
-			} else {
-				gorgeous[idx] = CLPRE + strings.ToLower(item)
-			}
+		if counter[item] == 1 {
+			gorgeous[idx] = item
 		} else {
-			gorgeous[idx] = fmt.Sprintf("f%s_%d", strings.ToLower(item), counter[item])
+			gorgeous[idx] = fmt.Sprintf("%s%d", item, idx)
 		}
 	}
 	return gorgeous

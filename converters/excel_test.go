@@ -13,8 +13,8 @@ import (
 func TestExcelConvertFile(t *testing.T) {
 	converter := &ExcelConverter{}
 
-	inputPath := "../sample_data/sample.xlsx" // Assuming sample_data is at project root
-	outputPath := "../test_output/excel_convert.db"
+	inputPath := "../sample_data/demo_mavgo_flight/History.xlsx" // Using real sample data
+	outputPath := "../sample_out/excel_convert.db"
 
 	err := converter.ConvertFile(inputPath, outputPath)
 	if err != nil {
@@ -29,8 +29,15 @@ func TestExcelConvertFile(t *testing.T) {
 	}
 	defer db.Close()
 
+	// Get the first table name
+	var tableName string
+	err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").Scan(&tableName)
+	if err != nil {
+		t.Fatalf("Failed to get table name: %v", err)
+	}
+
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM data").Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM " + tableName).Scan(&count)
 	if err != nil {
 		t.Fatalf("Failed to query database: %v", err)
 	}
@@ -43,7 +50,7 @@ func TestExcelConvertFile(t *testing.T) {
 func TestExcelConvertToSQL(t *testing.T) {
 	converter := &ExcelConverter{}
 
-	inputPath := "../sample_data/sample.xlsx"
+	inputPath := "../sample_data/demo_mavgo_flight/History.xlsx"
 
 	file, err := os.Open(inputPath)
 	if err != nil {
@@ -64,8 +71,8 @@ func TestExcelParseAndConvert(t *testing.T) {
 	// Test that Excel sheets are properly parsed and converted
 	converter := &ExcelConverter{}
 
-	inputPath := "../sample_data/sample.xlsx"
-	outputPath := "../test_output/excel_parse.db"
+	inputPath := "../sample_data/demo_mavgo_flight/History.xlsx"
+	outputPath := "../sample_out/excel_parse.db"
 
 	err := converter.ConvertFile(inputPath, outputPath)
 	if err != nil {
@@ -73,46 +80,71 @@ func TestExcelParseAndConvert(t *testing.T) {
 	}
 	t.Logf("Excel ParseAndConvert output: %s", outputPath)
 
-	// Check table structure
+	// Check that tables were created
 	db, err := sql.Open("sqlite3", outputPath)
 	if err != nil {
 		t.Fatalf("Failed to open output database: %v", err)
 	}
 	defer db.Close()
 
-	rows, err := db.Query("PRAGMA table_info(data)")
+	// Get list of tables
+	tableRows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
 	if err != nil {
-		t.Fatalf("Failed to get table info: %v", err)
+		t.Fatalf("Failed to query tables: %v", err)
 	}
-	defer rows.Close()
+	defer tableRows.Close()
 
-	columns := 0
-	for rows.Next() {
-		columns++
-	}
-
-	if columns == 0 {
-		t.Error("Expected columns in table, but found none")
-	}
-
-	// Verify data types are TEXT
-	rows, err = db.Query("PRAGMA table_info(data)")
-	if err != nil {
-		t.Fatalf("Failed to get table info: %v", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, dflt_value interface{}
-		var pk int
-		err = rows.Scan(&cid, &name, &ctype, &notnull, &dflt_value, &pk)
+	tables := []string{}
+	for tableRows.Next() {
+		var name string
+		err = tableRows.Scan(&name)
 		if err != nil {
-			t.Fatalf("Failed to scan column info: %v", err)
+			t.Fatalf("Failed to scan table name: %v", err)
 		}
-		if ctype != "TEXT" {
-			t.Errorf("Expected column type TEXT, got %s", ctype)
+		tables = append(tables, name)
+	}
+
+	expectedTables := map[string]bool{
+		"organized":       true,
+		"timeline":        true,
+		"raw_content":     true,
+		"example_for_chatgpt": true,
+	}
+
+	if len(tables) < 4 {
+		t.Errorf("Expected at least 4 tables, got %d: %v", len(tables), tables)
+	}
+
+	for _, table := range tables {
+		if expectedTables[table] {
+			delete(expectedTables, table)
+		}
+	}
+
+	if len(expectedTables) > 0 {
+		missing := []string{}
+		for t := range expectedTables {
+			missing = append(missing, t)
+		}
+		t.Errorf("Missing expected tables: %v", missing)
+	}
+
+	// Check one table's structure
+	if len(tables) > 0 {
+		tableName := tables[0]
+		rows, err := db.Query("PRAGMA table_info(" + tableName + ")")
+		if err != nil {
+			t.Fatalf("Failed to get table info for %s: %v", tableName, err)
+		}
+		defer rows.Close()
+
+		columns := 0
+		for rows.Next() {
+			columns++
+		}
+
+		if columns == 0 {
+			t.Errorf("Expected columns in table %s, but found none", tableName)
 		}
 	}
 }

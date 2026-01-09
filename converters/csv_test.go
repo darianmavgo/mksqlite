@@ -12,8 +12,8 @@ import (
 func TestCSVConvertFile(t *testing.T) {
 	converter := &CSVConverter{}
 
-	inputPath := "../sample_data/sample.csv" // Assuming sample_data is at project root
-	outputPath := "../test_output/csv_convert.db"
+	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv" // Using real sample data
+	outputPath := "../sample_out/csv_convert.db"
 
 	err := converter.ConvertFile(inputPath, outputPath)
 	if err != nil {
@@ -42,8 +42,8 @@ func TestCSVConvertFile(t *testing.T) {
 func TestCSVConvertToSQL(t *testing.T) {
 	converter := &CSVConverter{}
 
-	inputPath := "../sample_data/sample.csv"
-	outputPath := "../test_output/csv_convert.sql"
+	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv"
+	outputPath := "../sample_out/csv_convert.sql"
 
 	file, err := os.Open(inputPath)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestCSVConvertToSQL(t *testing.T) {
 }
 
 func TestCSVParseCSV(t *testing.T) {
-	inputPath := "../sample_data/sample.csv"
+	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv"
 	file, err := os.Open(inputPath)
 	if err != nil {
 		t.Fatalf("Failed to open input file: %v", err)

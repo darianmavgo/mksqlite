@@ -36,30 +36,6 @@ func (e *ExcelConverter) ConvertFile(inputPath, outputPath string) error {
 	}
 	defer f.Close()
 
-	// Get first sheet
-	sheets := f.GetSheetList()
-	if len(sheets) == 0 {
-		return fmt.Errorf("no sheets found in Excel file")
-	}
-	sheetName := sheets[0]
-
-	// Get all rows from the first sheet
-	rows, err := f.GetRows(sheetName)
-	if err != nil {
-		return fmt.Errorf("failed to read Excel rows: %w", err)
-	}
-
-	if len(rows) == 0 {
-		return fmt.Errorf("no data found in Excel sheet")
-	}
-
-	// First row is headers
-	headers := rows[0]
-	dataRows := rows[1:]
-
-	// Sanitize headers for SQL column names
-	sanitizedHeaders := GenColumnNames(headers)
-
 	// Connect to SQLite database
 	db, err := sql.Open("sqlite3", outputPath)
 	if err != nil {
@@ -67,47 +43,74 @@ func (e *ExcelConverter) ConvertFile(inputPath, outputPath string) error {
 	}
 	defer db.Close()
 
-	// Create table
-	createTableSQL := GenCreateTableSQL("data", sanitizedHeaders)
-	_, err = db.Exec(createTableSQL)
-	if err != nil {
-		return fmt.Errorf("failed to create table: %w", err)
+	// Get all sheets and convert each one to a SQLite table
+	sheets := f.GetSheetList()
+	tables := GenTableNames(sheets)
+	if len(sheets) == 0 {
+		return fmt.Errorf("no sheets found in Excel file")
 	}
 
-	// Prepare insert statement
-	insertSQL, err := GenPreparedStmt("data", sanitizedHeaders, InsertStmt)
-	if err != nil {
-		return fmt.Errorf("failed to generate insert statement: %w", err)
-	}
-	stmt, err := db.Prepare(insertSQL)
-	if err != nil {
-		return fmt.Errorf("failed to prepare insert statement: %w", err)
-	}
-	defer stmt.Close()
-
-	// Insert data rows
-	for _, row := range dataRows {
-		// Ensure row has the same number of columns as headers
-		if len(row) < len(sanitizedHeaders) {
-			// Pad with empty strings
-			for len(row) < len(sanitizedHeaders) {
-				row = append(row, "")
-			}
-		} else if len(row) > len(sanitizedHeaders) {
-			// Truncate to match header count
-			row = row[:len(sanitizedHeaders)]
-		}
-
-		// Convert row to interface{} slice for insertion
-		values := make([]interface{}, len(row))
-		for i, val := range row {
-			values[i] = val
-		}
-
-		_, err = stmt.Exec(values...)
+	for idx, sheetName := range sheets {
+		// Get all rows from this sheet
+		rows, err := f.GetRows(sheetName)
 		if err != nil {
-			return fmt.Errorf("failed to insert row: %w", err)
+			return fmt.Errorf("failed to read sheet %s: %w", sheetName, err)
 		}
+
+		if len(rows) == 0 {
+			continue // Skip empty sheets
+		}
+
+		// First row is headers
+		headers := rows[0]
+		dataRows := rows[1:]
+
+		// Sanitize headers for SQL column names
+		sanitizedHeaders := GenColumnNames(headers)
+
+		// Create table
+		createTableSQL := GenCreateTableSQL(tables[idx], sanitizedHeaders)
+		_, err = db.Exec(createTableSQL)
+		if err != nil {
+			return fmt.Errorf("failed to create table for sheet %s: %w", sheetName, err)
+		}
+
+		// Prepare insert statement
+		insertSQL, err := GenPreparedStmt(tables[idx], sanitizedHeaders, InsertStmt)
+		if err != nil {
+			return fmt.Errorf("failed to generate insert statement for sheet %s: %w", sheetName, err)
+		}
+		stmt, err := db.Prepare(insertSQL)
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert statement for sheet %s: %w", sheetName, err)
+		}
+
+		// Insert data rows
+		for _, row := range dataRows {
+			// Ensure row has the same number of columns as headers
+			if len(row) < len(sanitizedHeaders) {
+				// Pad with empty strings
+				for len(row) < len(sanitizedHeaders) {
+					row = append(row, "")
+				}
+			} else if len(row) > len(sanitizedHeaders) {
+				// Truncate to match header count
+				row = row[:len(sanitizedHeaders)]
+			}
+
+			// Convert row to interface{} slice for insertion
+			values := make([]interface{}, len(row))
+			for i, val := range row {
+				values[i] = val
+			}
+
+			_, err = stmt.Exec(values...)
+			if err != nil {
+				return fmt.Errorf("failed to insert row in sheet %s: %w", sheetName, err)
+			}
+		}
+
+		stmt.Close()
 	}
 
 	return nil
