@@ -10,6 +10,17 @@ import (
 
 // FileToSQLite converts a file to SQLite using the appropriate converter
 func FileToSQLite(inputPath, outputPath string) error {
+	// Check if input is a directory
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat input path: %w", err)
+	}
+
+	if info.IsDir() {
+		converter := &converters.FilesystemConverter{}
+		return converter.ConvertFile(inputPath, outputPath)
+	}
+
 	ext := filepath.Ext(inputPath)
 	var converter converters.FileConverter
 
@@ -67,6 +78,22 @@ func main() {
 
 // exportToSQL exports a file as SQL statements to writer
 func exportToSQL(inputPath string, writer io.Writer) error {
+	// Check if input is a directory
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat input path: %w", err)
+	}
+
+	if info.IsDir() {
+		converter := &converters.FilesystemConverter{}
+		file, err := os.Open(inputPath)
+		if err != nil {
+			return fmt.Errorf("failed to open input directory: %w", err)
+		}
+		defer file.Close()
+		return converter.ConvertToSQL(file, writer)
+	}
+
 	ext := filepath.Ext(inputPath)
 	var converter converters.StreamConverter
 
