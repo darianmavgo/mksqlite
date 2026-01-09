@@ -15,9 +15,7 @@ const (
 	UpdateStmt SQLStmtType = "UPDATE"
 	SelectStmt SQLStmtType = "SELECT"
 	DeleteStmt SQLStmtType = "DELETE"
-)
 
-const (
 	TBPRE = "tb"
 	CLPRE = "cl"
 )
