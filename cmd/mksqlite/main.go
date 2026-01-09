@@ -10,6 +10,17 @@ import (
 
 // FileToSQLite converts a file to SQLite using the appropriate converter
 func FileToSQLite(inputPath, outputPath string) error {
+	// Check if input is a directory
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat input path: %w", err)
+	}
+
+	if info.IsDir() {
+		converter := &converters.FilesystemConverter{}
+		return converter.ConvertFile(inputPath, outputPath)
+	}
+
 	ext := filepath.Ext(inputPath)
 	var converter converters.FileConverter
 
@@ -18,6 +29,8 @@ func FileToSQLite(inputPath, outputPath string) error {
 		converter = &converters.CSVConverter{}
 	case ".xlsx", ".xls":
 		converter = &converters.ExcelConverter{}
+	case ".zip":
+		converter = &converters.ZipConverter{}
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
@@ -65,6 +78,22 @@ func main() {
 
 // exportToSQL exports a file as SQL statements to writer
 func exportToSQL(inputPath string, writer io.Writer) error {
+	// Check if input is a directory
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat input path: %w", err)
+	}
+
+	if info.IsDir() {
+		converter := &converters.FilesystemConverter{}
+		file, err := os.Open(inputPath)
+		if err != nil {
+			return fmt.Errorf("failed to open input directory: %w", err)
+		}
+		defer file.Close()
+		return converter.ConvertToSQL(file, writer)
+	}
+
 	ext := filepath.Ext(inputPath)
 	var converter converters.StreamConverter
 
@@ -74,6 +103,9 @@ func exportToSQL(inputPath string, writer io.Writer) error {
 	case ".xlsx", ".xls":
 		fmt.Printf("Excel SQL export not yet implemented\n")
 		return fmt.Errorf("Excel SQL export not yet implemented")
+	case ".zip":
+		fmt.Printf("Zip SQL export not yet implemented\n")
+		return fmt.Errorf("Zip SQL export not yet implemented")
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
