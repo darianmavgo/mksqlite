@@ -1,0 +1,124 @@
+package converters
+
+import (
+	"database/sql"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+func TestFilesystemConvertFile(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+
+	// Create some files
+	files := []struct {
+		path string
+		content string
+	}{
+		{"file1.txt", "content1"},
+		{"subdir/file2.log", "content2"},
+	}
+
+	for _, f := range files {
+		path := filepath.Join(tempDir, f.path)
+		err := os.MkdirAll(filepath.Dir(path), 0755)
+		if err != nil {
+			t.Fatalf("failed to create dir: %v", err)
+		}
+		err = os.WriteFile(path, []byte(f.content), 0644)
+		if err != nil {
+			t.Fatalf("failed to create file: %v", err)
+		}
+	}
+
+	converter := &FilesystemConverter{}
+	outputPath := filepath.Join(tempDir, "output.db")
+
+	err := converter.ConvertFile(tempDir, outputPath)
+	if err != nil {
+		t.Fatalf("ConvertFile failed: %v", err)
+	}
+
+	// Verify database content
+	db, err := sql.Open("sqlite3", outputPath)
+	if err != nil {
+		t.Fatalf("failed to open db: %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT path, name, size, is_dir FROM data ORDER BY path")
+	if err != nil {
+		t.Fatalf("failed to query db: %v", err)
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var path, name string
+		var size int64
+		var isDir int
+		if err := rows.Scan(&path, &name, &size, &isDir); err != nil {
+			t.Fatalf("failed to scan row: %v", err)
+		}
+		t.Logf("Found: path=%s, name=%s, size=%d, isDir=%d", path, name, size, isDir)
+		count++
+	}
+
+	// We expect at least the files created, plus directories including root
+	if count < len(files) {
+		t.Errorf("Expected at least %d rows, got %d", len(files), count)
+	}
+}
+
+func TestFilesystemConvertToSQL(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir := t.TempDir()
+
+	// Create a file
+	path := filepath.Join(tempDir, "test.txt")
+	err := os.WriteFile(path, []byte("test"), 0644)
+	if err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+
+	converter := &FilesystemConverter{}
+	outputPath := filepath.Join(tempDir, "output.sql")
+	outputFile, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatalf("failed to create output file: %v", err)
+	}
+	defer outputFile.Close()
+
+	// Open the directory as a file (needed for the hack)
+	dirFile, err := os.Open(tempDir)
+	if err != nil {
+		t.Fatalf("failed to open temp dir: %v", err)
+	}
+	defer dirFile.Close()
+
+	err = converter.ConvertToSQL(dirFile, outputFile)
+	if err != nil {
+		t.Fatalf("ConvertToSQL failed: %v", err)
+	}
+
+	// Verify SQL content
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read sql file: %v", err)
+	}
+	sqlStr := string(content)
+
+	if !strings.Contains(sqlStr, "CREATE TABLE data") {
+		t.Error("Expected CREATE TABLE in output")
+	}
+	if !strings.Contains(sqlStr, "INSERT INTO data") {
+		t.Error("Expected INSERT INTO in output")
+	}
+	if !strings.Contains(sqlStr, "test.txt") {
+		t.Error("Expected filename in output")
+	}
+}
