@@ -25,6 +25,13 @@ type Converter interface {
 	StreamConverter
 }
 
+// RowProvider defines the interface for providing data to be inserted into SQLite
+type RowProvider interface {
+	GetTableNames() []string
+	GetHeaders(tableName string) []string
+	GetRows(tableName string) [][]interface{}
+}
+
 // sqliteKeywords is a slice containing all possible SQLite SQL keywords.
 // This list is based on the complete set recognized by SQLite (as of recent versions),
 // sourced from the official documentation: https://sqlite.org/lang_keywords.html

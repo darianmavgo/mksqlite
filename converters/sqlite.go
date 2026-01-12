@@ -2,9 +2,14 @@
 package converters
 
 import (
+	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // SQLStmtType defines the type of SQL statement to generate
@@ -49,11 +54,17 @@ func GenCompliantNames(rawnames []string, prefix string) []string {
 			continue
 		}
 
+		// specific sqlite rule: cannot start with a number
+		if item[0] >= '0' && item[0] <= '9' {
+			item = fmt.Sprintf("%s%s", prefix, item)
+		}
+
 		counter[item]++
 		if counter[item] == 1 {
 			gorgeous[idx] = item
 		} else {
-			gorgeous[idx] = fmt.Sprintf("%s%d", item, idx)
+			// use counter to avoid collision
+			gorgeous[idx] = fmt.Sprintf("%s%d", item, counter[item])
 		}
 	}
 	return gorgeous
@@ -174,4 +185,77 @@ func GenCreateTableSQL(tableName string, columnNames []string) string {
 	}
 	sql += ")"
 	return sql
+}
+
+// ImportToSQLite imports data from a RowProvider into a SQLite database
+func ImportToSQLite(provider RowProvider, dbPath string) error {
+	// Ensure output directory exists
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Remove existing database file if it exists
+	if _, err := os.Stat(dbPath); err == nil {
+		if err := os.Remove(dbPath); err != nil {
+			return fmt.Errorf("failed to remove existing database: %w", err)
+		}
+	}
+
+	// Connect to SQLite database
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
+	tableNames := provider.GetTableNames()
+	for _, tableName := range tableNames {
+		headers := provider.GetHeaders(tableName)
+		rows := provider.GetRows(tableName)
+
+		if len(headers) == 0 && len(rows) == 0 {
+			continue // Skip empty tables
+		}
+
+		// Create table
+		createTableSQL := GenCreateTableSQL(tableName, headers)
+		_, err = db.Exec(createTableSQL)
+		if err != nil {
+			return fmt.Errorf("failed to create table %s: %w", tableName, err)
+		}
+
+		// Prepare insert statement
+		insertSQL, err := GenPreparedStmt(tableName, headers, InsertStmt)
+		if err != nil {
+			return fmt.Errorf("failed to generate insert statement for table %s: %w", tableName, err)
+		}
+		stmt, err := db.Prepare(insertSQL)
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert statement for table %s: %w", tableName, err)
+		}
+		defer stmt.Close()
+
+		// Insert rows
+		for _, row := range rows {
+			// Ensure row has the same number of columns as headers
+			if len(row) < len(headers) {
+				// Pad with nil or empty string?
+				// Interface{} allows anything, but we need to match the placeholders.
+				// For simplicity, let's append nil (which becomes NULL in sqlite)
+				newRow := make([]interface{}, len(headers))
+				copy(newRow, row)
+				row = newRow
+			} else if len(row) > len(headers) {
+				row = row[:len(headers)]
+			}
+
+			_, err = stmt.Exec(row...)
+			if err != nil {
+				return fmt.Errorf("failed to insert row in table %s: %w", tableName, err)
+			}
+		}
+	}
+
+	return nil
 }
