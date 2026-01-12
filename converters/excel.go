@@ -1,57 +1,89 @@
 package converters
 
 import (
-	"database/sql"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/xuri/excelize/v2"
 )
 
 // ExcelConverter converts Excel files to SQLite tables
-type ExcelConverter struct{}
+type ExcelConverter struct {
+	sheets map[string][][]string // map tableName to rows
+	tableNames []string
+	headers map[string][]string // map tableName to headers
+}
+
+// Ensure ExcelConverter implements RowProvider
+var _ RowProvider = (*ExcelConverter)(nil)
+
+// NewExcelConverter creates a new ExcelConverter
+func NewExcelConverter(inputPath string) (*ExcelConverter, error) {
+	// Open Excel file
+	f, err := excelize.OpenFile(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open Excel file: %w", err)
+	}
+	defer f.Close()
+
+	// Get all sheets
+	sheets := f.GetSheetList()
+	if len(sheets) == 0 {
+		return nil, fmt.Errorf("no sheets found in Excel file")
+	}
+
+	tableNames := GenTableNames(sheets)
+
+	dataMap := make(map[string][][]string)
+	headersMap := make(map[string][]string)
+
+	for idx, sheetName := range sheets {
+		rows, err := f.GetRows(sheetName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read sheet %s: %w", sheetName, err)
+		}
+
+		if len(rows) == 0 {
+			continue // Skip empty sheets
+		}
+
+		tableName := tableNames[idx]
+
+		headers := rows[0]
+		dataRows := rows[1:]
+
+		headersMap[tableName] = GenColumnNames(headers)
+		dataMap[tableName] = dataRows
+	}
+
+	return &ExcelConverter{
+		sheets: dataMap,
+		tableNames: tableNames,
+		headers: headersMap,
+	}, nil
+}
+
 
 // ConvertFile implements FileConverter for Excel files (creates SQLite database)
 func (e *ExcelConverter) ConvertFile(inputPath, outputPath string) error {
-	// Ensure output directory exists
-	dir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
-	}
-
-	// Remove existing database file if it exists
-	if _, err := os.Stat(outputPath); err == nil {
-		if err := os.Remove(outputPath); err != nil {
-			return fmt.Errorf("failed to remove existing database: %w", err)
-		}
-	}
-
-	// Open Excel file
+	// Re-initialize logic here for simplicity
 	f, err := excelize.OpenFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to open Excel file: %w", err)
 	}
 	defer f.Close()
 
-	// Connect to SQLite database
-	db, err := sql.Open("sqlite3", outputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Get all sheets and convert each one to a SQLite table
+	// Get all sheets
 	sheets := f.GetSheetList()
-	tables := GenTableNames(sheets)
 	if len(sheets) == 0 {
 		return fmt.Errorf("no sheets found in Excel file")
 	}
 
+	e.tableNames = GenTableNames(sheets)
+	e.sheets = make(map[string][][]string)
+	e.headers = make(map[string][]string)
+
 	for idx, sheetName := range sheets {
-		// Get all rows from this sheet
 		rows, err := f.GetRows(sheetName)
 		if err != nil {
 			return fmt.Errorf("failed to read sheet %s: %w", sheetName, err)
@@ -61,59 +93,44 @@ func (e *ExcelConverter) ConvertFile(inputPath, outputPath string) error {
 			continue // Skip empty sheets
 		}
 
-		// First row is headers
+		tableName := e.tableNames[idx]
+
 		headers := rows[0]
 		dataRows := rows[1:]
 
-		// Sanitize headers for SQL column names
-		sanitizedHeaders := GenColumnNames(headers)
-
-		// Create table
-		createTableSQL := GenCreateTableSQL(tables[idx], sanitizedHeaders)
-		_, err = db.Exec(createTableSQL)
-		if err != nil {
-			return fmt.Errorf("failed to create table for sheet %s: %w", sheetName, err)
-		}
-
-		// Prepare insert statement
-		insertSQL, err := GenPreparedStmt(tables[idx], sanitizedHeaders, InsertStmt)
-		if err != nil {
-			return fmt.Errorf("failed to generate insert statement for sheet %s: %w", sheetName, err)
-		}
-		stmt, err := db.Prepare(insertSQL)
-		if err != nil {
-			return fmt.Errorf("failed to prepare insert statement for sheet %s: %w", sheetName, err)
-		}
-
-		// Insert data rows
-		for _, row := range dataRows {
-			// Ensure row has the same number of columns as headers
-			if len(row) < len(sanitizedHeaders) {
-				// Pad with empty strings
-				for len(row) < len(sanitizedHeaders) {
-					row = append(row, "")
-				}
-			} else if len(row) > len(sanitizedHeaders) {
-				// Truncate to match header count
-				row = row[:len(sanitizedHeaders)]
-			}
-
-			// Convert row to interface{} slice for insertion
-			values := make([]interface{}, len(row))
-			for i, val := range row {
-				values[i] = val
-			}
-
-			_, err = stmt.Exec(values...)
-			if err != nil {
-				return fmt.Errorf("failed to insert row in sheet %s: %w", sheetName, err)
-			}
-		}
-
-		stmt.Close()
+		e.headers[tableName] = GenColumnNames(headers)
+		e.sheets[tableName] = dataRows
 	}
 
-	return nil
+	return ImportToSQLite(e, outputPath)
+}
+
+// GetTableNames implements RowProvider
+func (e *ExcelConverter) GetTableNames() []string {
+	return e.tableNames
+}
+
+// GetHeaders implements RowProvider
+func (e *ExcelConverter) GetHeaders(tableName string) []string {
+	return e.headers[tableName]
+}
+
+// GetRows implements RowProvider
+func (e *ExcelConverter) GetRows(tableName string) [][]interface{} {
+	rows, ok := e.sheets[tableName]
+	if !ok {
+		return nil
+	}
+
+	interfaceRows := make([][]interface{}, len(rows))
+	for i, row := range rows {
+		interfaceRow := make([]interface{}, len(row))
+		for j, val := range row {
+			interfaceRow[j] = val
+		}
+		interfaceRows[i] = interfaceRow
+	}
+	return interfaceRows
 }
 
 // ConvertToSQL implements StreamConverter for Excel files (outputs SQL to writer)

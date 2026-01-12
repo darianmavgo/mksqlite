@@ -1,93 +1,94 @@
 package converters
 
 import (
-	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // CSVConverter converts CSV files to SQLite tables
-type CSVConverter struct{}
+type CSVConverter struct {
+	headers []string
+	rows    [][]string
+}
+
+// Ensure CSVConverter implements RowProvider
+var _ RowProvider = (*CSVConverter)(nil)
+
+// NewCSVConverter creates a new CSVConverter and parses the file
+func NewCSVConverter(inputPath string) (*CSVConverter, error) {
+	file, err := os.Open(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open input file: %w", err)
+	}
+	defer file.Close()
+
+	headers, rows, err := parseCSV(file)
+	if err != nil {
+		return nil, err
+	}
+
+	return &CSVConverter{
+		headers: headers,
+		rows:    rows,
+	}, nil
+}
 
 // ConvertFile implements FileConverter for CSV files (creates SQLite database)
 func (c *CSVConverter) ConvertFile(inputPath, outputPath string) error {
-	// Ensure output directory exists
-	dir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
-	}
+	// Re-initialize with the input path (in case c is reused or uninitialized)
+	// Actually, the main.go creates a new instance. But main.go does `&converters.CSVConverter{}`.
+	// So we need to parse the file inside ConvertFile.
 
-	// Remove existing database file if it exists
-	if _, err := os.Stat(outputPath); err == nil {
-		if err := os.Remove(outputPath); err != nil {
-			return fmt.Errorf("failed to remove existing database: %w", err)
-		}
-	}
-
-	// Open the CSV file
+	// Since we are changing the architecture, let's just do it here.
 	file, err := os.Open(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to open input file: %w", err)
 	}
 	defer file.Close()
 
-	return c.convertCSVToSQLite(file, outputPath)
-}
-
-// convertCSVToSQLite converts CSV data from reader to SQLite database
-func (c *CSVConverter) convertCSVToSQLite(reader io.Reader, dbPath string) error {
-	headers, rows, err := parseCSV(reader)
+	headers, rows, err := parseCSV(file)
 	if err != nil {
 		return err
 	}
 
-	// Connect to SQLite database
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
+	c.headers = headers
+	c.rows = rows
 
-	// Create table
-	createTableSQL := GenCreateTableSQL("data", headers)
-	_, err = db.Exec(createTableSQL)
-	if err != nil {
-		return fmt.Errorf("failed to create table: %w", err)
-	}
+	return ImportToSQLite(c, outputPath)
+}
 
-	// Prepare insert statement
-	insertSQL, err := GenPreparedStmt("data", headers, InsertStmt)
-	if err != nil {
-		return fmt.Errorf("failed to generate insert statement: %w", err)
-	}
-	stmt, err := db.Prepare(insertSQL)
-	if err != nil {
-		return fmt.Errorf("failed to prepare insert statement: %w", err)
-	}
-	defer stmt.Close()
+// GetTableNames implements RowProvider
+func (c *CSVConverter) GetTableNames() []string {
+	return []string{"data"}
+}
 
-	// Insert rows
-	for _, row := range rows {
-		values := make([]interface{}, len(row))
-		for i, val := range row {
-			values[i] = val
-		}
-
-		_, err = stmt.Exec(values...)
-		if err != nil {
-			return fmt.Errorf("failed to insert row: %w", err)
-		}
+// GetHeaders implements RowProvider
+func (c *CSVConverter) GetHeaders(tableName string) []string {
+	if tableName == "data" {
+		return c.headers
 	}
-
 	return nil
 }
 
+// GetRows implements RowProvider
+func (c *CSVConverter) GetRows(tableName string) [][]interface{} {
+	if tableName == "data" {
+		// Convert string rows to interface rows
+		interfaceRows := make([][]interface{}, len(c.rows))
+		for i, row := range c.rows {
+			interfaceRow := make([]interface{}, len(row))
+			for j, val := range row {
+				interfaceRow[j] = val
+			}
+			interfaceRows[i] = interfaceRow
+		}
+		return interfaceRows
+	}
+	return nil
+}
 
 
 // parseCSV reads CSV data from reader and returns sanitized headers and rows
@@ -198,5 +199,3 @@ func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 
 	return writeSQL(headers, rows, writer)
 }
-
-

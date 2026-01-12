@@ -1,19 +1,19 @@
 package converters
 
 import (
-	"database/sql"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/net/html"
 )
 
 // HTMLConverter converts HTML files to SQLite tables
-type HTMLConverter struct{}
+type HTMLConverter struct {
+	tables     []tableData
+	tableNames []string
+}
 
 type tableData struct {
 	rawName string
@@ -21,50 +21,23 @@ type tableData struct {
 	rows    [][]string
 }
 
-// ConvertFile implements FileConverter for HTML files (creates SQLite database)
-func (c *HTMLConverter) ConvertFile(inputPath, outputPath string) error {
-	// Ensure output directory exists
-	dir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
-	}
+// Ensure HTMLConverter implements RowProvider
+var _ RowProvider = (*HTMLConverter)(nil)
 
-	// Remove existing database file if it exists
-	if _, err := os.Stat(outputPath); err == nil {
-		if err := os.Remove(outputPath); err != nil {
-			return fmt.Errorf("failed to remove existing database: %w", err)
-		}
-	}
-
-	// Open input file
+// NewHTMLConverter creates a new HTMLConverter
+func NewHTMLConverter(inputPath string) (*HTMLConverter, error) {
 	file, err := os.Open(inputPath)
 	if err != nil {
-		return fmt.Errorf("failed to open input file: %w", err)
+		return nil, fmt.Errorf("failed to open input file: %w", err)
 	}
 	defer file.Close()
 
-	return c.convertHTMLToSQLite(file, outputPath)
-}
-
-// convertHTMLToSQLite converts HTML data from reader to SQLite database
-func (c *HTMLConverter) convertHTMLToSQLite(reader io.Reader, dbPath string) error {
-	tables, err := parseHTML(reader)
+	tables, err := parseHTML(file)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if len(tables) == 0 {
-		return fmt.Errorf("no tables found in HTML")
-	}
-
-	// Connect to SQLite database
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	// Generate table names
+	// Generate table names once
 	rawNames := make([]string, len(tables))
 	for i, t := range tables {
 		if t.rawName != "" {
@@ -75,61 +48,82 @@ func (c *HTMLConverter) convertHTMLToSQLite(reader io.Reader, dbPath string) err
 	}
 	tableNames := GenTableNames(rawNames)
 
-	for i, t := range tables {
-		tableName := tableNames[i]
+	return &HTMLConverter{
+		tables:     tables,
+		tableNames: tableNames,
+	}, nil
+}
 
-		if len(t.headers) == 0 && len(t.rows) == 0 {
-			continue // Skip empty tables
-		}
+// ConvertFile implements FileConverter for HTML files (creates SQLite database)
+func (c *HTMLConverter) ConvertFile(inputPath, outputPath string) error {
+	// Re-initialize for simplicity in migration
+	file, err := os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to open input file: %w", err)
+	}
+	defer file.Close()
 
-		// If we only have rows but no headers (extracted as headers=row[0]), logic handles it.
-		// parseHTML puts first row into headers.
-
-		// Sanitize headers
-		sanitizedHeaders := GenColumnNames(t.headers)
-
-		// Create table
-		createTableSQL := GenCreateTableSQL(tableName, sanitizedHeaders)
-		_, err = db.Exec(createTableSQL)
-		if err != nil {
-			return fmt.Errorf("failed to create table %s: %w", tableName, err)
-		}
-
-		// Prepare insert statement
-		insertSQL, err := GenPreparedStmt(tableName, sanitizedHeaders, InsertStmt)
-		if err != nil {
-			return fmt.Errorf("failed to generate insert statement for table %s: %w", tableName, err)
-		}
-		stmt, err := db.Prepare(insertSQL)
-		if err != nil {
-			return fmt.Errorf("failed to prepare insert statement for table %s: %w", tableName, err)
-		}
-
-		// Insert rows
-		for _, row := range t.rows {
-			// Ensure row has the same number of columns as headers
-			if len(row) < len(sanitizedHeaders) {
-				for len(row) < len(sanitizedHeaders) {
-					row = append(row, "")
-				}
-			} else if len(row) > len(sanitizedHeaders) {
-				row = row[:len(sanitizedHeaders)]
-			}
-
-			values := make([]interface{}, len(row))
-			for i, val := range row {
-				values[i] = val
-			}
-
-			_, err = stmt.Exec(values...)
-			if err != nil {
-				stmt.Close()
-				return fmt.Errorf("failed to insert row in table %s: %w", tableName, err)
-			}
-		}
-		stmt.Close()
+	tables, err := parseHTML(file)
+	if err != nil {
+		return err
 	}
 
+	if len(tables) == 0 {
+		return fmt.Errorf("no tables found in HTML")
+	}
+
+	c.tables = tables
+
+	// Generate table names
+	rawNames := make([]string, len(tables))
+	for i, t := range tables {
+		if t.rawName != "" {
+			rawNames[i] = t.rawName
+		} else {
+			rawNames[i] = fmt.Sprintf("table%d", i)
+		}
+	}
+	c.tableNames = GenTableNames(rawNames)
+
+	return ImportToSQLite(c, outputPath)
+}
+
+// GetTableNames implements RowProvider
+func (c *HTMLConverter) GetTableNames() []string {
+	return c.tableNames
+}
+
+// GetHeaders implements RowProvider
+func (c *HTMLConverter) GetHeaders(tableName string) []string {
+	for i, name := range c.tableNames {
+		if name == tableName {
+			// Sanitize headers here as ImportToSQLite expects clean headers?
+			// ImportToSQLite does not sanitize headers, it calls GenCreateTableSQL which calls GenColumnTypes.
+			// However, ImportToSQLite passes headers to GenPreparedStmt and GenCreateTableSQL.
+			// The original code called GenColumnNames inside ConvertFile.
+			// So we should return sanitized headers here.
+			return GenColumnNames(c.tables[i].headers)
+		}
+	}
+	return nil
+}
+
+// GetRows implements RowProvider
+func (c *HTMLConverter) GetRows(tableName string) [][]interface{} {
+	for i, name := range c.tableNames {
+		if name == tableName {
+			rows := c.tables[i].rows
+			interfaceRows := make([][]interface{}, len(rows))
+			for r, row := range rows {
+				interfaceRow := make([]interface{}, len(row))
+				for c, val := range row {
+					interfaceRow[c] = val
+				}
+				interfaceRows[r] = interfaceRow
+			}
+			return interfaceRows
+		}
+	}
 	return nil
 }
 

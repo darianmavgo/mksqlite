@@ -2,41 +2,21 @@ package converters
 
 import (
 	"archive/zip"
-	"database/sql"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"time"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // ZipConverter converts ZIP archive file lists to SQLite tables
-type ZipConverter struct{}
+type ZipConverter struct {
+	rows [][]interface{}
+}
+
+// Ensure ZipConverter implements RowProvider
+var _ RowProvider = (*ZipConverter)(nil)
 
 // ConvertFile implements FileConverter for ZIP files (creates SQLite database)
 func (z *ZipConverter) ConvertFile(inputPath, outputPath string) error {
-	// Ensure output directory exists
-	dir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
-	}
-
-	// Remove existing database file if it exists
-	if _, err := os.Stat(outputPath); err == nil {
-		if err := os.Remove(outputPath); err != nil {
-			return fmt.Errorf("failed to remove existing database: %w", err)
-		}
-	}
-
-	// Connect to SQLite database
-	db, err := sql.Open("sqlite3", outputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
 	// Open the ZIP file
 	r, err := zip.OpenReader(inputPath)
 	if err != nil {
@@ -44,38 +24,7 @@ func (z *ZipConverter) ConvertFile(inputPath, outputPath string) error {
 	}
 	defer r.Close()
 
-	// Define headers based on metadata fields
-	rawHeaders := []string{
-		"name",
-		"comment",
-		"modified",
-		"uncompressed_size",
-		"compressed_size",
-		"crc32",
-		"is_dir",
-	}
-
-	// Sanitize headers
-	headers := GenColumnNames(rawHeaders)
-	tableName := "file_list"
-
-	// Create table
-	createTableSQL := GenCreateTableSQL(tableName, headers)
-	_, err = db.Exec(createTableSQL)
-	if err != nil {
-		return fmt.Errorf("failed to create table: %w", err)
-	}
-
-	// Prepare insert statement
-	insertSQL, err := GenPreparedStmt(tableName, headers, InsertStmt)
-	if err != nil {
-		return fmt.Errorf("failed to generate insert statement: %w", err)
-	}
-	stmt, err := db.Prepare(insertSQL)
-	if err != nil {
-		return fmt.Errorf("failed to prepare insert statement: %w", err)
-	}
-	defer stmt.Close()
+	z.rows = make([][]interface{}, 0)
 
 	// Iterate through files in the zip archive
 	for _, f := range r.File {
@@ -95,12 +44,39 @@ func (z *ZipConverter) ConvertFile(inputPath, outputPath string) error {
 			isDir,
 		}
 
-		_, err = stmt.Exec(values...)
-		if err != nil {
-			return fmt.Errorf("failed to insert row for file %s: %w", f.Name, err)
-		}
+		z.rows = append(z.rows, values)
 	}
 
+	return ImportToSQLite(z, outputPath)
+}
+
+// GetTableNames implements RowProvider
+func (z *ZipConverter) GetTableNames() []string {
+	return []string{"file_list"}
+}
+
+// GetHeaders implements RowProvider
+func (z *ZipConverter) GetHeaders(tableName string) []string {
+	if tableName == "file_list" {
+		rawHeaders := []string{
+			"name",
+			"comment",
+			"modified",
+			"uncompressed_size",
+			"compressed_size",
+			"crc32",
+			"is_dir",
+		}
+		return GenColumnNames(rawHeaders)
+	}
+	return nil
+}
+
+// GetRows implements RowProvider
+func (z *ZipConverter) GetRows(tableName string) [][]interface{} {
+	if tableName == "file_list" {
+		return z.rows
+	}
 	return nil
 }
 

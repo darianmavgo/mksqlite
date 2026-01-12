@@ -1,7 +1,6 @@
 package converters
 
 import (
-	"database/sql"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,12 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // FilesystemConverter converts directory listings to SQLite tables
-type FilesystemConverter struct{}
+type FilesystemConverter struct {
+	rows [][]interface{}
+}
+
+// Ensure FilesystemConverter implements RowProvider
+var _ RowProvider = (*FilesystemConverter)(nil)
 
 // ConvertFile implements FileConverter for filesystem directories
 func (c *FilesystemConverter) ConvertFile(inputPath, outputPath string) error {
@@ -27,45 +29,7 @@ func (c *FilesystemConverter) ConvertFile(inputPath, outputPath string) error {
 		return fmt.Errorf("input path is not a directory: %s", inputPath)
 	}
 
-	// Ensure output directory exists
-	dir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
-	}
-
-	// Remove existing database file if it exists
-	if _, err := os.Stat(outputPath); err == nil {
-		if err := os.Remove(outputPath); err != nil {
-			return fmt.Errorf("failed to remove existing database: %w", err)
-		}
-	}
-
-	// Connect to SQLite database
-	db, err := sql.Open("sqlite3", outputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer db.Close()
-
-	headers := []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
-
-	// Create table
-	createTableSQL := GenCreateTableSQL("data", headers)
-	_, err = db.Exec(createTableSQL)
-	if err != nil {
-		return fmt.Errorf("failed to create table: %w", err)
-	}
-
-	// Prepare insert statement
-	insertSQL, err := GenPreparedStmt("data", headers, InsertStmt)
-	if err != nil {
-		return fmt.Errorf("failed to generate insert statement: %w", err)
-	}
-	stmt, err := db.Prepare(insertSQL)
-	if err != nil {
-		return fmt.Errorf("failed to prepare insert statement: %w", err)
-	}
-	defer stmt.Close()
+	c.rows = make([][]interface{}, 0)
 
 	// Walk directory
 	err = filepath.WalkDir(inputPath, func(path string, d fs.DirEntry, err error) error {
@@ -93,10 +57,9 @@ func (c *FilesystemConverter) ConvertFile(inputPath, outputPath string) error {
 		ext := filepath.Ext(path)
 		name := d.Name()
 
-		_, err = stmt.Exec(relPath, name, size, ext, modTime, isDir)
-		if err != nil {
-			return fmt.Errorf("failed to insert row for %s: %w", path, err)
-		}
+		c.rows = append(c.rows, []interface{}{
+			relPath, name, size, ext, modTime, isDir,
+		})
 
 		return nil
 	})
@@ -105,6 +68,27 @@ func (c *FilesystemConverter) ConvertFile(inputPath, outputPath string) error {
 		return fmt.Errorf("failed to walk directory: %w", err)
 	}
 
+	return ImportToSQLite(c, outputPath)
+}
+
+// GetTableNames implements RowProvider
+func (c *FilesystemConverter) GetTableNames() []string {
+	return []string{"data"}
+}
+
+// GetHeaders implements RowProvider
+func (c *FilesystemConverter) GetHeaders(tableName string) []string {
+	if tableName == "data" {
+		return []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
+	}
+	return nil
+}
+
+// GetRows implements RowProvider
+func (c *FilesystemConverter) GetRows(tableName string) [][]interface{} {
+	if tableName == "data" {
+		return c.rows
+	}
 	return nil
 }
 
