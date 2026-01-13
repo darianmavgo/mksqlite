@@ -2,13 +2,16 @@
 
 ![Go Version](https://img.shields.io/badge/Go-1.25-blue)
 
-A library and command-line tool to convert files to SQLite databases with generalized I/O support.
+A robust library and command-line tool designed to convert various file formats and data streams into SQLite databases or SQL statements.
 
-## Version 1
+## Goal
 
-mksqlite was born from Mavgo Flight.  Realizing that just a library that converts a file type or data format into sqlite is valuable by itself independent of super useful URLs and web browsing. 
-The goal is to first duplicate the code specific to conversion then upgrade it, then expand it. Then use this resulting library in Mavgo Flight and other tools. 
-Supports converting CSV and Excel files to SQLite databases or SQL export.
+`mksqlite` generalizes the conversion of structured data into SQLite. Born from the need to process diverse data sources for projects like Mavgo Flight, it aims to be a universal adapter that turns files (CSV, Excel, HTML, Zip archives) and directories into queryable SQL tables.
+
+The project emphasizes:
+- **Generalized I/O**: Abstractions that work with local files, streams, and directories.
+- **Portability**: Generating standard SQLite databases (`.db`) or SQL dump files.
+- **Extensibility**: Easy addition of new format converters.
 
 ## Installation
 
@@ -18,127 +21,113 @@ git clone <repository-url>
 cd mksqlite
 
 # Build the CLI
-go build ./cmd/mksqlite
+go build -o mksqlite cmd/mksqlite/main.go
 ```
 
-## Usage
+## CLI Usage
+
+The `mksqlite` tool operates in two modes: **Database Creation** and **SQL Export**.
+
+### 1. Create SQLite Database
+
+Converts the input file or directory into a SQLite database file.
 
 ```bash
-# Build the CLI
-go build ./cmd/mksqlite
+# Syntax
+./mksqlite <input_path> [output_db_path]
 
-# Convert files to SQLite databases
-./mksqlite input.csv output.db
-./mksqlite input.xlsx output.db
-
-# Export files as SQL statements (to stdout)
-./mksqlite --sql input.csv
-./mksqlite --sql input.xlsx  # Not yet implemented for Excel
+# Examples
+./mksqlite data.csv                  # Creates data.csv.db
+./mksqlite data.xlsx my_data.db      # Creates my_data.db
+./mksqlite ./my_folder/ index.db     # Creates index.db from directory listing
 ```
 
-## Examples
+### 2. Export SQL
 
-### Converting Sample Data
-
-Using the included sample files:
+Generates `CREATE TABLE` and `INSERT` statements to standard output. Useful for piping to other tools or databases.
 
 ```bash
-# Convert CSV to SQLite database
-./mksqlite sample_data/sample.csv sample.db
+# Syntax
+./mksqlite --sql <input_path> > output.sql
 
-# View the created database (requires sqlite3 CLI)
-sqlite3 sample.db "SELECT * FROM sample;"
-
-# Export CSV as SQL statements
-./mksqlite --sql sample_data/sample.csv
+# Examples
+./mksqlite --sql data.csv > dump.sql
+./mksqlite --sql ./my_folder/ > folder_structure.sql
 ```
 
-### Sample CSV Content
+## Supported Formats & Capabilities
 
-The `sample_data/sample.csv` contains:
+`mksqlite` automatically detects the input type based on file extension or if the path is a directory.
 
-```
-Name,Age,City
-John,25,New York
-Jane,30,London
-Bob,35,Paris
-```
-
-## Features
-
-- **Dual Output Modes**: Create SQLite databases or export SQL DDL/DML statements
-- **Generalized I/O**: Supports both file paths and io.Reader/Writer interfaces
-- **Robust Parsing**: Handles CSV/Excel files with variable column counts and complex data
-- **Column Sanitization**: Automatically cleans column names for SQL compatibility
-- **Extensible Architecture**: Easy to add new file format converters
+| Input Type | Extensions | Output Table Structure | SQL Export Support |
+|------------|------------|------------------------|--------------------|
+| **CSV** | `.csv` | Table columns match CSV headers. Column names are sanitized for SQL. | ✅ Yes |
+| **Excel** | `.xlsx`, `.xls` | Each sheet becomes a table. First row is used as headers. | ❌ No (Planned) |
+| **HTML** | `.html`, `.htm` | Extracts `<table id="...">` elements. If no ID, tables are named `table0`, `table1`, etc. | ✅ Yes |
+| **Zip** | `.zip` | Creates a `file_list` table containing metadata of files inside the archive (name, size, CRC, etc.). | ❌ No (Planned) |
+| **Filesystem** | (Directory) | Creates a `data` table listing all files recursively with columns: `path`, `name`, `size`, `extension`, `mod_time`, `is_dir`. | ✅ Yes |
 
 ## Library Usage
 
-### File-based Conversion (creates SQLite databases)
+`mksqlite` can be used as a Go library to integrate conversion logic into your own applications.
+
+### Interfaces
+
+The core logic is built around flexible interfaces defined in `converters/types.go`:
+
+- **`FileConverter`**: Converts a source file directly to a destination SQLite DB file.
+- **`StreamConverter`**: Converts an `io.Reader` to SQL statements written to an `io.Writer`.
+- **`RowProvider`**: (Internal) standardized interface for fetching rows/headers from any source.
+
+### Example: Converting a File to SQLite
 
 ```go
-import "mksqlite/pkg/parsers"
+import "mksqlite/converters"
 
-// For CSV files
-converter := &parsers.CSVConverter{}
-err := converter.ConvertFile("input.csv", "output.db")
+func main() {
+    // CSV
+    csvConv := &converters.CSVConverter{}
+    err := csvConv.ConvertFile("input.csv", "output.db")
 
-// For Excel files
-converter := &parsers.ExcelConverter{}
-err := converter.ConvertFile("input.xlsx", "output.db")
+    // HTML
+    htmlConv := &converters.HTMLConverter{}
+    err = htmlConv.ConvertFile("report.html", "output.db")
+
+    // Directory (Filesystem)
+    fsConv := &converters.FilesystemConverter{}
+    err = fsConv.ConvertFile("./data_dir", "index.db")
+}
 ```
 
-### Stream-based Conversion (exports SQL to io.Writer)
+### Example: Exporting SQL to Stdout
 
 ```go
 import (
     "os"
-    "mksqlite/pkg/parsers"
+    "mksqlite/converters"
 )
 
-// Export CSV as SQL statements
-converter := &parsers.CSVConverter{}
-file, _ := os.Open("input.csv")
-defer file.Close()
-err := converter.ConvertToSQL(file, os.Stdout)
+func main() {
+    // Open input file
+    file, _ := os.Open("data.csv")
+    defer file.Close()
+
+    // Export SQL
+    converter := &converters.CSVConverter{}
+    err := converter.ConvertToSQL(file, os.Stdout)
+}
 ```
 
-### Using Interfaces
+## Development
 
-```go
-// FileConverter interface - for creating SQLite databases
-var fileConv parsers.FileConverter = &parsers.CSVConverter{}
+### Requirements
+- Go 1.25+
+- Dependencies:
+    - `github.com/mattn/go-sqlite3`
+    - `github.com/xuri/excelize/v2`
+    - `golang.org/x/net/html`
 
-// StreamConverter interface - for SQL export
-var streamConv parsers.StreamConverter = &parsers.CSVConverter{}
-
-// Combined interface
-var conv parsers.Converter = &parsers.CSVConverter{}
+### Running Tests
+```bash
+go test ./...
 ```
-
-## Project Structure
-
-- `cmd/mksqlite/`: Command-line interface with dual mode support
-- `pkg/parsers/`: File format parsers implementing generalized I/O interfaces
-  - `types.go`: Interface definitions
-  - `csv.go`: CSV parser with stream support
-  - `excel.go`: Excel parser (file-based for now)
-
-## Dependencies
-
-- `github.com/mattn/go-sqlite3` for SQLite database operations
-- `github.com/xuri/excelize/v2` for Excel file parsing
-
-## Architecture
-
-The library uses a dual-interface approach:
-
-- **`FileConverter`**: Converts files to SQLite databases (requires file system access)
-- **`StreamConverter`**: Converts data streams to SQL output (works with any `io.Reader`/`io.Writer`)
-
-This design allows the library to work with:
-- Local files
-- Network streams
-- In-memory data
-- Pipes and redirects
-- Any `io.Reader`/`io.Writer` implementation
