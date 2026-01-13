@@ -43,7 +43,7 @@ func FileToSQLite(inputPath, outputPath string) error {
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage:")
-		fmt.Println("  mksqlite <input_file> <output_db>          # Convert to SQLite database")
+		fmt.Println("  mksqlite <input_file> [output_db]          # Convert to SQLite database")
 		fmt.Println("  mksqlite --sql <input_file> [output_file]  # Export as SQL statements")
 		os.Exit(1)
 	}
@@ -60,13 +60,13 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		if len(os.Args) < 3 {
-			fmt.Println("Usage: mksqlite <input_file> <output_db>")
-			os.Exit(1)
-		}
-
 		inputPath := os.Args[1]
-		outputPath := os.Args[2]
+		var outputPath string
+		if len(os.Args) >= 3 {
+			outputPath = os.Args[2]
+		} else {
+			outputPath = inputPath + ".db"
+		}
 
 		err := FileToSQLite(inputPath, outputPath)
 		if err != nil {
