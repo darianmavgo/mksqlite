@@ -12,6 +12,10 @@ import (
 
 func TestHTMLConverter_ConvertFile(t *testing.T) {
 	inputPath := "../sample_data/demo_mavgo_flight/BERKSHIRE HATHAWAY INC.html"
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		t.Skipf("Sample file not found: %s", inputPath)
+	}
+
 	// Create a temp file for output to avoid polluting the source tree
 	f, err := os.CreateTemp("", "html_convert_*.db")
 	if err != nil {
