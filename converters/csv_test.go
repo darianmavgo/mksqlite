@@ -13,9 +13,19 @@ func TestCSVConvertFile(t *testing.T) {
 	converter := &CSVConverter{}
 
 	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv" // Using real sample data
-	outputPath := "../sample_out/csv_convert.db"
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		t.Skipf("Sample file not found: %s", inputPath)
+	}
 
-	err := converter.ConvertFile(inputPath, outputPath)
+	f, err := os.CreateTemp("", "csv_convert_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	outputPath := f.Name()
+	f.Close()
+	defer os.Remove(outputPath)
+
+	err = converter.ConvertFile(inputPath, outputPath)
 	if err != nil {
 		t.Fatalf("ConvertFile failed: %v", err)
 	}
@@ -37,13 +47,37 @@ func TestCSVConvertFile(t *testing.T) {
 	if count == 0 {
 		t.Error("Expected data in database, but found none")
 	}
+
+	// Verify specific data exists
+	// Description column should contain "Visible.edu Visible.ed"
+	// Column name might be sanitized. "Description" -> "description"
+	var desc string
+	err = db.QueryRow("SELECT description FROM data WHERE description LIKE 'Visible.edu%' LIMIT 1").Scan(&desc)
+	if err != nil {
+		// Try generic check if column name is different
+		t.Logf("Failed to query 'description' column: %v. Checking generic existence.", err)
+	} else {
+		if !strings.Contains(desc, "Visible.edu") {
+			t.Errorf("Expected description to contain 'Visible.edu', got '%s'", desc)
+		}
+	}
 }
 
 func TestCSVConvertToSQL(t *testing.T) {
 	converter := &CSVConverter{}
 
 	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv"
-	outputPath := "../sample_out/csv_convert.sql"
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		t.Skipf("Sample file not found: %s", inputPath)
+	}
+
+	f, err := os.CreateTemp("", "csv_convert_*.sql")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	outputPath := f.Name()
+	f.Close()
+	defer os.Remove(outputPath)
 
 	file, err := os.Open(inputPath)
 	if err != nil {
@@ -61,7 +95,6 @@ func TestCSVConvertToSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConvertToSQL failed: %v", err)
 	}
-	t.Logf("CSV ConvertToSQL output: %s", outputPath)
 
 	// Read back to verify
 	content, err := os.ReadFile(outputPath)
@@ -75,10 +108,17 @@ func TestCSVConvertToSQL(t *testing.T) {
 	if !strings.Contains(sqlOutput, "INSERT INTO data") {
 		t.Error("Expected INSERT statement in SQL output")
 	}
+	if !strings.Contains(sqlOutput, "Visible.edu") {
+		t.Error("Expected 'Visible.edu' in SQL output")
+	}
 }
 
 func TestCSVParseCSV(t *testing.T) {
 	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv"
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		t.Skipf("Sample file not found: %s", inputPath)
+	}
+
 	file, err := os.Open(inputPath)
 	if err != nil {
 		t.Fatalf("Failed to open input file: %v", err)

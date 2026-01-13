@@ -14,9 +14,19 @@ func TestExcelConvertFile(t *testing.T) {
 	converter := &ExcelConverter{}
 
 	inputPath := "../sample_data/demo_mavgo_flight/History.xlsx" // Using real sample data
-	outputPath := "../sample_out/excel_convert.db"
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		t.Skipf("Sample file not found: %s", inputPath)
+	}
 
-	err := converter.ConvertFile(inputPath, outputPath)
+	f, err := os.CreateTemp("", "excel_convert_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	outputPath := f.Name()
+	f.Close()
+	defer os.Remove(outputPath)
+
+	err = converter.ConvertFile(inputPath, outputPath)
 	if err != nil {
 		t.Fatalf("ConvertFile failed: %v", err)
 	}
@@ -51,6 +61,9 @@ func TestExcelConvertToSQL(t *testing.T) {
 	converter := &ExcelConverter{}
 
 	inputPath := "../sample_data/demo_mavgo_flight/History.xlsx"
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		t.Skipf("Sample file not found: %s", inputPath)
+	}
 
 	file, err := os.Open(inputPath)
 	if err != nil {
@@ -72,9 +85,19 @@ func TestExcelParseAndConvert(t *testing.T) {
 	converter := &ExcelConverter{}
 
 	inputPath := "../sample_data/demo_mavgo_flight/History.xlsx"
-	outputPath := "../sample_out/excel_parse.db"
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		t.Skipf("Sample file not found: %s", inputPath)
+	}
 
-	err := converter.ConvertFile(inputPath, outputPath)
+	f, err := os.CreateTemp("", "excel_parse_*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	outputPath := f.Name()
+	f.Close()
+	defer os.Remove(outputPath)
+
+	err = converter.ConvertFile(inputPath, outputPath)
 	if err != nil {
 		t.Fatalf("ConvertFile failed: %v", err)
 	}
