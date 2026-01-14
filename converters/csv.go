@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+const (
+	CSVPRE = "tb0"
+)
+
 // CSVConverter converts CSV files to SQLite tables
 type CSVConverter struct {
 	headers []string
@@ -62,12 +66,12 @@ func (c *CSVConverter) ConvertFile(inputPath, outputPath string) error {
 
 // GetTableNames implements RowProvider
 func (c *CSVConverter) GetTableNames() []string {
-	return []string{"data"}
+	return []string{CSVPRE}
 }
 
 // GetHeaders implements RowProvider
 func (c *CSVConverter) GetHeaders(tableName string) []string {
-	if tableName == "data" {
+	if tableName == CSVPRE {
 		return c.headers
 	}
 	return nil
@@ -75,7 +79,7 @@ func (c *CSVConverter) GetHeaders(tableName string) []string {
 
 // GetRows implements RowProvider
 func (c *CSVConverter) GetRows(tableName string) [][]interface{} {
-	if tableName == "data" {
+	if tableName == CSVPRE {
 		// Convert string rows to interface rows
 		interfaceRows := make([][]interface{}, len(c.rows))
 		for i, row := range c.rows {
@@ -89,7 +93,6 @@ func (c *CSVConverter) GetRows(tableName string) [][]interface{} {
 	}
 	return nil
 }
-
 
 // parseCSV reads CSV data from reader and returns sanitized headers and rows
 func parseCSV(reader io.Reader) ([]string, [][]string, error) {
