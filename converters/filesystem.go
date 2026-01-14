@@ -12,7 +12,7 @@ import (
 
 // FilesystemConverter converts directory listings to SQLite tables
 type FilesystemConverter struct {
-	rows [][]interface{}
+	inputPath string
 }
 
 // Ensure FilesystemConverter implements RowProvider
@@ -29,16 +29,38 @@ func (c *FilesystemConverter) ConvertFile(inputPath, outputPath string) error {
 		return fmt.Errorf("input path is not a directory: %s", inputPath)
 	}
 
-	c.rows = make([][]interface{}, 0)
+	c.inputPath = inputPath
+
+	return ImportToSQLite(c, outputPath)
+}
+
+// GetTableNames implements RowProvider
+func (c *FilesystemConverter) GetTableNames() []string {
+	return []string{"data"}
+}
+
+// GetHeaders implements RowProvider
+func (c *FilesystemConverter) GetHeaders(tableName string) []string {
+	if tableName == "data" {
+		return []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
+	}
+	return nil
+}
+
+// ScanRows implements RowProvider
+func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
+	if tableName != "data" {
+		return nil
+	}
 
 	// Walk directory
-	err = filepath.WalkDir(inputPath, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(c.inputPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Calculate relative path
-		relPath, err := filepath.Rel(inputPath, path)
+		relPath, err := filepath.Rel(c.inputPath, path)
 		if err != nil {
 			relPath = path // Fallback to full path if rel fails
 		}
@@ -57,38 +79,17 @@ func (c *FilesystemConverter) ConvertFile(inputPath, outputPath string) error {
 		ext := filepath.Ext(path)
 		name := d.Name()
 
-		c.rows = append(c.rows, []interface{}{
+		row := []interface{}{
 			relPath, name, size, ext, modTime, isDir,
-		})
+		}
 
-		return nil
+		return yield(row)
 	})
 
 	if err != nil {
 		return fmt.Errorf("failed to walk directory: %w", err)
 	}
 
-	return ImportToSQLite(c, outputPath)
-}
-
-// GetTableNames implements RowProvider
-func (c *FilesystemConverter) GetTableNames() []string {
-	return []string{"data"}
-}
-
-// GetHeaders implements RowProvider
-func (c *FilesystemConverter) GetHeaders(tableName string) []string {
-	if tableName == "data" {
-		return []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
-	}
-	return nil
-}
-
-// GetRows implements RowProvider
-func (c *FilesystemConverter) GetRows(tableName string) [][]interface{} {
-	if tableName == "data" {
-		return c.rows
-	}
 	return nil
 }
 

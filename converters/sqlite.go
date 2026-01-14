@@ -212,10 +212,9 @@ func ImportToSQLite(provider RowProvider, dbPath string) error {
 	tableNames := provider.GetTableNames()
 	for _, tableName := range tableNames {
 		headers := provider.GetHeaders(tableName)
-		rows := provider.GetRows(tableName)
 
-		if len(headers) == 0 && len(rows) == 0 {
-			continue // Skip empty tables
+		if len(headers) == 0 {
+			continue // Skip tables without headers
 		}
 
 		// Create table
@@ -225,24 +224,29 @@ func ImportToSQLite(provider RowProvider, dbPath string) error {
 			return fmt.Errorf("failed to create table %s: %w", tableName, err)
 		}
 
+		// Begin transaction
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction: %w", err)
+		}
+
 		// Prepare insert statement
 		insertSQL, err := GenPreparedStmt(tableName, headers, InsertStmt)
 		if err != nil {
+			tx.Rollback()
 			return fmt.Errorf("failed to generate insert statement for table %s: %w", tableName, err)
 		}
-		stmt, err := db.Prepare(insertSQL)
+		stmt, err := tx.Prepare(insertSQL)
 		if err != nil {
+			tx.Rollback()
 			return fmt.Errorf("failed to prepare insert statement for table %s: %w", tableName, err)
 		}
-		defer stmt.Close()
 
-		// Insert rows
-		for _, row := range rows {
+		// Insert rows using streaming ScanRows
+		err = provider.ScanRows(tableName, func(row []interface{}) error {
 			// Ensure row has the same number of columns as headers
 			if len(row) < len(headers) {
-				// Pad with nil or empty string?
-				// Interface{} allows anything, but we need to match the placeholders.
-				// For simplicity, let's append nil (which becomes NULL in sqlite)
+				// Pad with nil (NULL)
 				newRow := make([]interface{}, len(headers))
 				copy(newRow, row)
 				row = newRow
@@ -250,10 +254,22 @@ func ImportToSQLite(provider RowProvider, dbPath string) error {
 				row = row[:len(headers)]
 			}
 
-			_, err = stmt.Exec(row...)
+			_, err := stmt.Exec(row...)
 			if err != nil {
 				return fmt.Errorf("failed to insert row in table %s: %w", tableName, err)
 			}
+			return nil
+		})
+
+		stmt.Close() // Close statement before commit/rollback
+
+		if err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to scan rows for table %s: %w", tableName, err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit transaction for table %s: %w", tableName, err)
 		}
 	}
 
