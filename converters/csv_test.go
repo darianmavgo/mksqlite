@@ -29,7 +29,7 @@ func TestCSVConvertFile(t *testing.T) {
 	defer db.Close()
 
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM data").Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM tb0").Scan(&count)
 	if err != nil {
 		t.Fatalf("Failed to query database: %v", err)
 	}
@@ -70,6 +70,10 @@ func TestCSVConvertToSQL(t *testing.T) {
 	}
 	sqlOutput := string(content)
 	if !strings.Contains(sqlOutput, "CREATE TABLE data") {
+		// ConvertToSQL hardcodes "data" as table name in CSVConverter.ConvertToSQL
+		// Wait, did I change that?
+		// In CSVConverter.ConvertToSQL I used "data" explicitly.
+		// Let's check CSVConverter.ConvertToSQL
 		t.Error("Expected CREATE TABLE statement in SQL output")
 	}
 	if !strings.Contains(sqlOutput, "INSERT INTO data") {

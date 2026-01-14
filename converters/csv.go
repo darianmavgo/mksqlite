@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CSVPRE = "data"
+	CSVPRE = "tb0"
 )
 
 // CSVConverter converts CSV files to SQLite tables
