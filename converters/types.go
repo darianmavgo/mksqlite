@@ -29,7 +29,10 @@ type Converter interface {
 type RowProvider interface {
 	GetTableNames() []string
 	GetHeaders(tableName string) []string
-	GetRows(tableName string) [][]interface{}
+	// ScanRows iterates over rows for the given table.
+	// It calls the yield function for each row.
+	// If yield returns an error, iteration stops and that error is returned.
+	ScanRows(tableName string, yield func([]interface{}) error) error
 }
 
 // sqliteKeywords is a slice containing all possible SQLite SQL keywords.

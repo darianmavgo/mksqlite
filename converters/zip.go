@@ -9,7 +9,7 @@ import (
 
 // ZipConverter converts ZIP archive file lists to SQLite tables
 type ZipConverter struct {
-	rows [][]interface{}
+	inputPath string
 }
 
 // Ensure ZipConverter implements RowProvider
@@ -17,36 +17,7 @@ var _ RowProvider = (*ZipConverter)(nil)
 
 // ConvertFile implements FileConverter for ZIP files (creates SQLite database)
 func (z *ZipConverter) ConvertFile(inputPath, outputPath string) error {
-	// Open the ZIP file
-	r, err := zip.OpenReader(inputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open zip file: %w", err)
-	}
-	defer r.Close()
-
-	z.rows = make([][]interface{}, 0)
-
-	// Iterate through files in the zip archive
-	for _, f := range r.File {
-		// Prepare values
-		isDir := "false"
-		if f.FileInfo().IsDir() {
-			isDir = "true"
-		}
-
-		values := []interface{}{
-			f.Name,
-			f.Comment,
-			f.Modified.Format(time.RFC3339),
-			f.UncompressedSize64,
-			f.CompressedSize64,
-			f.CRC32,
-			isDir,
-		}
-
-		z.rows = append(z.rows, values)
-	}
-
+	z.inputPath = inputPath
 	return ImportToSQLite(z, outputPath)
 }
 
@@ -72,10 +43,40 @@ func (z *ZipConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
-// GetRows implements RowProvider
-func (z *ZipConverter) GetRows(tableName string) [][]interface{} {
-	if tableName == "file_list" {
-		return z.rows
+// ScanRows implements RowProvider
+func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
+	if tableName != "file_list" {
+		return nil
+	}
+
+	// Open the ZIP file
+	r, err := zip.OpenReader(z.inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to open zip file: %w", err)
+	}
+	defer r.Close()
+
+	// Iterate through files in the zip archive
+	for _, f := range r.File {
+		// Prepare values
+		isDir := "false"
+		if f.FileInfo().IsDir() {
+			isDir = "true"
+		}
+
+		values := []interface{}{
+			f.Name,
+			f.Comment,
+			f.Modified.Format(time.RFC3339),
+			f.UncompressedSize64,
+			f.CompressedSize64,
+			f.CRC32,
+			isDir,
+		}
+
+		if err := yield(values); err != nil {
+			return err
+		}
 	}
 	return nil
 }

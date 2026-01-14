@@ -108,20 +108,21 @@ func (c *HTMLConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
-// GetRows implements RowProvider
-func (c *HTMLConverter) GetRows(tableName string) [][]interface{} {
+// ScanRows implements RowProvider
+func (c *HTMLConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
 	for i, name := range c.tableNames {
 		if name == tableName {
 			rows := c.tables[i].rows
-			interfaceRows := make([][]interface{}, len(rows))
-			for r, row := range rows {
+			for _, row := range rows {
 				interfaceRow := make([]interface{}, len(row))
 				for c, val := range row {
 					interfaceRow[c] = val
 				}
-				interfaceRows[r] = interfaceRow
+				if err := yield(interfaceRow); err != nil {
+					return err
+				}
 			}
-			return interfaceRows
+			return nil
 		}
 	}
 	return nil

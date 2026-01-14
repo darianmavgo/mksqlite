@@ -2,7 +2,6 @@ package converters
 
 import (
 	"database/sql"
-	"io"
 	"os"
 	"strings"
 	"testing"
@@ -51,6 +50,7 @@ func TestExcelConvertToSQL(t *testing.T) {
 	converter := &ExcelConverter{}
 
 	inputPath := "../sample_data/demo_mavgo_flight/History.xlsx"
+	outputPath := "../sample_out/excel_convert.sql"
 
 	file, err := os.Open(inputPath)
 	if err != nil {
@@ -58,12 +58,29 @@ func TestExcelConvertToSQL(t *testing.T) {
 	}
 	defer file.Close()
 
-	err = converter.ConvertToSQL(file, io.Discard)
-	if err == nil {
-		t.Fatal("Expected ConvertToSQL to fail for Excel (not implemented)")
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatalf("Failed to create output file: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("Unexpected error: %v", err)
+	defer outFile.Close()
+
+	err = converter.ConvertToSQL(file, outFile)
+	if err != nil {
+		t.Fatalf("ConvertToSQL failed: %v", err)
+	}
+	t.Logf("Excel ConvertToSQL output: %s", outputPath)
+
+	// Read back to verify
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+	sqlOutput := string(content)
+	if !strings.Contains(sqlOutput, "CREATE TABLE") {
+		t.Error("Expected CREATE TABLE statement in SQL output")
+	}
+	if !strings.Contains(sqlOutput, "INSERT INTO") {
+		t.Error("Expected INSERT statement in SQL output")
 	}
 }
 
