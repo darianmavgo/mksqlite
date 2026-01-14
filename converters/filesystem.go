@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+const (
+	FSTB = "tb0"
+)
+
 // FilesystemConverter converts directory listings to SQLite tables
 type FilesystemConverter struct {
 	inputPath string
@@ -36,12 +40,12 @@ func (c *FilesystemConverter) ConvertFile(inputPath, outputPath string) error {
 
 // GetTableNames implements RowProvider
 func (c *FilesystemConverter) GetTableNames() []string {
-	return []string{"data"}
+	return []string{FSTB}
 }
 
 // GetHeaders implements RowProvider
 func (c *FilesystemConverter) GetHeaders(tableName string) []string {
-	if tableName == "data" {
+	if tableName == FSTB {
 		return []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
 	}
 	return nil
@@ -49,7 +53,7 @@ func (c *FilesystemConverter) GetHeaders(tableName string) []string {
 
 // ScanRows implements RowProvider
 func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
-	if tableName != "data" {
+	if tableName != FSTB {
 		return nil
 	}
 
@@ -114,7 +118,7 @@ func (c *FilesystemConverter) ConvertToSQL(reader io.Reader, writer io.Writer) e
 	headers := []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
 
 	// Write CREATE TABLE statement
-	createTableSQL := GenCreateTableSQL("data", headers)
+	createTableSQL := GenCreateTableSQL(FSTB, headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}

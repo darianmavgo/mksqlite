@@ -6,7 +6,7 @@ import "io"
 type Request struct {
 	AbsFilePath string // Path to the input file
 	StageSqlite string // Path to the output SQLite file
-	Table       string // Table name (optional, defaults to "data")
+	Table       string // Table name (optional, defaults to CSVTB)
 }
 
 // FileConverter defines the interface for converting files to SQLite databases

@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	CSVPRE = "data"
+	CSVTB = "tb0"
 )
 
 // CSVConverter converts CSV files to SQLite tables
@@ -61,12 +61,12 @@ func (c *CSVConverter) ConvertFile(inputPath, outputPath string) error {
 
 // GetTableNames implements RowProvider
 func (c *CSVConverter) GetTableNames() []string {
-	return []string{CSVPRE}
+	return []string{CSVTB}
 }
 
 // GetHeaders implements RowProvider
 func (c *CSVConverter) GetHeaders(tableName string) []string {
-	if tableName == CSVPRE {
+	if tableName == CSVTB {
 		return c.headers
 	}
 	return nil
@@ -74,7 +74,7 @@ func (c *CSVConverter) GetHeaders(tableName string) []string {
 
 // ScanRows implements RowProvider
 func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
-	if tableName != CSVPRE {
+	if tableName != CSVTB {
 		return nil
 	}
 
@@ -195,7 +195,7 @@ func parseCSV(reader io.Reader) ([]string, [][]string, error) {
 // writeSQL writes SQL DDL and DML statements to writer
 func writeSQL(headers []string, rows [][]string, writer io.Writer) error {
 	// Write CREATE TABLE statement
-	createTableSQL := GenCreateTableSQL("data", headers)
+	createTableSQL := GenCreateTableSQL(CSVTB, headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
@@ -263,7 +263,7 @@ func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 	sanitizedHeaders := GenColumnNames(filteredHeaders)
 
 	// Write CREATE TABLE statement
-	createTableSQL := GenCreateTableSQL("data", sanitizedHeaders)
+	createTableSQL := GenCreateTableSQL(CSVTB, sanitizedHeaders)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
