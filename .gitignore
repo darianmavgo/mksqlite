@@ -1,1 +1,54 @@
 *.db
+# === macOS Specific ===
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# === Go Specific ===
+# Binaries and archives
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Common binary output names
+bin/
+dist/
+/vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# === SQLite Specific ===
+# Exclude the database file itself (standard naming)
+*.db
+*.sqlite
+*.sqlite3
+
+# SQLite temporary/journal files
+*.db-journal
+*.db-shm
+*.db-wal
+
+# === Editor/IDE Specific ===
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains (GoLand)
+.idea/
+
+# === Environment Variables ===
+.env
+.env.local
