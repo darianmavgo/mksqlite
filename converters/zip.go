@@ -18,7 +18,7 @@ var _ RowProvider = (*ZipConverter)(nil)
 // ConvertFile implements FileConverter for ZIP files (creates SQLite database)
 func (z *ZipConverter) ConvertFile(inputPath, outputPath string) error {
 	z.inputPath = inputPath
-	return ImportToSQLite(z, outputPath)
+	return ImportToSQLiteFile(z, outputPath)
 }
 
 // GetTableNames implements RowProvider

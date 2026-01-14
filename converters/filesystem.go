@@ -35,7 +35,7 @@ func (c *FilesystemConverter) ConvertFile(inputPath, outputPath string) error {
 
 	c.inputPath = inputPath
 
-	return ImportToSQLite(c, outputPath)
+	return ImportToSQLiteFile(c, outputPath)
 }
 
 // GetTableNames implements RowProvider

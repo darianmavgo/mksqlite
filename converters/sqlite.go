@@ -4,6 +4,7 @@ package converters
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -191,8 +192,9 @@ func GenCreateTableSQL(tableName string, columnNames []string) string {
 	return sql
 }
 
-// ImportToSQLite imports data from a RowProvider into a SQLite database
-func ImportToSQLite(provider RowProvider, dbPath string) error {
+// ImportToSQLiteFile imports data from a RowProvider into a SQLite database file.
+// It creates the file (and directory if needed) and populates it.
+func ImportToSQLiteFile(provider RowProvider, dbPath string) error {
 	// Ensure output directory exists
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -213,6 +215,52 @@ func ImportToSQLite(provider RowProvider, dbPath string) error {
 	}
 	defer db.Close()
 
+	return populateDB(db, provider)
+}
+
+// ImportToSQLite imports data from a RowProvider and writes the resulting SQLite database
+// to the provided io.Writer. It uses a temporary file for construction.
+func ImportToSQLite(provider RowProvider, writer io.Writer) error {
+	// Create a temporary file
+	tmpFile, err := os.CreateTemp("", "mksqlite-*.db")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close() // Close it so sql.Open can use it
+
+	defer os.Remove(tmpPath) // Clean up temp file
+
+	// Connect to SQLite database
+	db, err := sql.Open("sqlite3", tmpPath)
+	if err != nil {
+		return fmt.Errorf("failed to open temp database: %w", err)
+	}
+
+	// Populate database
+	if err := populateDB(db, provider); err != nil {
+		db.Close()
+		return err
+	}
+	db.Close() // Close before reading
+
+	// Open temp file for reading
+	f, err := os.Open(tmpPath)
+	if err != nil {
+		return fmt.Errorf("failed to open temp file for reading: %w", err)
+	}
+	defer f.Close()
+
+	// Copy to writer
+	if _, err := io.Copy(writer, f); err != nil {
+		return fmt.Errorf("failed to write to output: %w", err)
+	}
+
+	return nil
+}
+
+// populateDB handles the common logic of creating tables and inserting rows
+func populateDB(db *sql.DB, provider RowProvider) error {
 	tableNames := provider.GetTableNames()
 	for _, tableName := range tableNames {
 		headers := provider.GetHeaders(tableName)
@@ -223,7 +271,7 @@ func ImportToSQLite(provider RowProvider, dbPath string) error {
 
 		// Create table
 		createTableSQL := GenCreateTableSQL(tableName, headers)
-		_, err = db.Exec(createTableSQL)
+		_, err := db.Exec(createTableSQL)
 		if err != nil {
 			return fmt.Errorf("failed to create table %s: %w", tableName, err)
 		}
@@ -297,6 +345,5 @@ func ImportToSQLite(provider RowProvider, dbPath string) error {
 			return fmt.Errorf("failed to commit transaction for table %s: %w", tableName, err)
 		}
 	}
-
 	return nil
 }

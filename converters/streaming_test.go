@@ -71,7 +71,7 @@ func TestStreamingInterruption(t *testing.T) {
 	BatchSize = 100
 	defer func() { BatchSize = originalBatchSize }()
 
-	err = ImportToSQLite(converter, dbPath)
+	err = ImportToSQLiteFile(converter, dbPath)
 	if err == nil {
 		t.Log("ImportToSQLite succeeded unexpectedly (stream interruption didn't occur or was handled?)")
 	} else {

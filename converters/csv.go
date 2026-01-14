@@ -83,7 +83,7 @@ func (c *CSVConverter) ConvertFile(inputPath, outputPath string) error {
 	c.headers = headers
 	c.inputPath = inputPath
 
-	return ImportToSQLite(c, outputPath)
+	return ImportToSQLiteFile(c, outputPath)
 }
 
 // GetTableNames implements RowProvider
