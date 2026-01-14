@@ -56,7 +56,7 @@ func GenCompliantNames(rawnames []string, prefix string) []string {
 
 		// specific sqlite rule: cannot start with a number
 		if item[0] >= '0' && item[0] <= '9' {
-			item = fmt.Sprintf("%s%s", prefix, item)
+			item = fmt.Sprintf("%s%d%s", prefix, idx, item)
 		}
 
 		counter[item]++
