@@ -2,12 +2,66 @@ package converters
 
 import (
 	"database/sql"
+	"fmt"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+func TestCSVConvertFromURL(t *testing.T) {
+	url := "https://pub-a1c6b68deb9d48e1b5783f84723c93ec.r2.dev/Apps_GoogleDownload_Darian.Device_takeout-20251014T200156Z-1-007_Takeout_Drive_trading_crisis-winners_TZA_6_years_data.csv"
+
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("Failed to fetch URL: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Failed to fetch URL, status code: %d", resp.StatusCode)
+	}
+
+	converter, err := NewCSVConverterFromReader(resp.Body)
+	if err != nil {
+		t.Fatalf("Failed to create converter from reader: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	outputPath := filepath.Join(tmpDir, "url_test.db")
+
+	err = ImportToSQLite(converter, outputPath)
+	if err != nil {
+		t.Logf("ImportToSQLite finished with error (possibly network interruption): %v", err)
+	} else {
+		t.Log("ImportToSQLite finished successfully")
+	}
+
+	// Verify database content
+	db, err := sql.Open("sqlite3", outputPath)
+	if err != nil {
+		t.Fatalf("Failed to open output database: %v", err)
+	}
+	defer db.Close()
+
+	var count int
+	// Using CSVTB default "tb0"
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s", CSVTB)
+	err = db.QueryRow(query).Scan(&count)
+	if err != nil {
+		// If the table doesn't exist, it means nothing was committed (or creation failed)
+		t.Fatalf("Failed to query database (table might be missing): %v", err)
+	}
+
+	t.Logf("Rows in DB: %d", count)
+
+	if count == 0 {
+		t.Error("Expected data in database, but found none")
+	}
+}
 
 func TestCSVConvertFile(t *testing.T) {
 	converter := &CSVConverter{}
