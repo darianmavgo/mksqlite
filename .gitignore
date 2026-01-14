@@ -1,4 +1,3 @@
-*.db
 # === macOS Specific ===
 .DS_Store
 .AppleDouble
