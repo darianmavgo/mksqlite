@@ -50,7 +50,7 @@ func TestFilesystemConvertFile(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query("SELECT path, name, size, is_dir FROM data ORDER BY path")
+	rows, err := db.Query("SELECT path, name, size, is_dir FROM tb0 ORDER BY path")
 	if err != nil {
 		t.Fatalf("failed to query db: %v", err)
 	}
@@ -112,10 +112,10 @@ func TestFilesystemConvertToSQL(t *testing.T) {
 	}
 	sqlStr := string(content)
 
-	if !strings.Contains(sqlStr, "CREATE TABLE data") {
+	if !strings.Contains(sqlStr, "CREATE TABLE tb0") {
 		t.Error("Expected CREATE TABLE in output")
 	}
-	if !strings.Contains(sqlStr, "INSERT INTO data") {
+	if !strings.Contains(sqlStr, "INSERT INTO tb0") {
 		t.Error("Expected INSERT INTO in output")
 	}
 	if !strings.Contains(sqlStr, "test.txt") {

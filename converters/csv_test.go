@@ -29,7 +29,7 @@ func TestCSVConvertFile(t *testing.T) {
 	defer db.Close()
 
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM data").Scan(&count)
+	err = db.QueryRow("SELECT COUNT(*) FROM tb0").Scan(&count)
 	if err != nil {
 		t.Fatalf("Failed to query database: %v", err)
 	}
@@ -69,10 +69,10 @@ func TestCSVConvertToSQL(t *testing.T) {
 		t.Fatalf("Failed to read output file: %v", err)
 	}
 	sqlOutput := string(content)
-	if !strings.Contains(sqlOutput, "CREATE TABLE data") {
+	if !strings.Contains(sqlOutput, "CREATE TABLE tb0") {
 		t.Error("Expected CREATE TABLE statement in SQL output")
 	}
-	if !strings.Contains(sqlOutput, "INSERT INTO data") {
+	if !strings.Contains(sqlOutput, "INSERT INTO tb0") {
 		t.Error("Expected INSERT statement in SQL output")
 	}
 }

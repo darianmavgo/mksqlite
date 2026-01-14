@@ -159,7 +159,7 @@ func (c *FilesystemConverter) ConvertToSQL(reader io.Reader, writer io.Writer) e
 			fmt.Sprintf("%d", isDir),
 		}
 
-		if _, err := fmt.Fprintf(writer, "INSERT INTO data (path, name, size, extension, mod_time, is_dir) VALUES ("); err != nil {
+		if _, err := fmt.Fprintf(writer, "INSERT INTO %s (path, name, size, extension, mod_time, is_dir) VALUES (", FSTB); err != nil {
 			return fmt.Errorf("failed to write INSERT start: %w", err)
 		}
 
