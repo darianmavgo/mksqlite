@@ -28,6 +28,10 @@ const (
 var (
 	space = regexp.MustCompile(`\s+`)
 	reg   = regexp.MustCompile(`[^a-zA-Z0-9 _]+`)
+
+	// BatchSize defines the number of rows to insert before committing a transaction.
+	// This ensures that long-running streams save progress periodically.
+	BatchSize = 1000
 )
 
 /*
@@ -242,6 +246,8 @@ func ImportToSQLite(provider RowProvider, dbPath string) error {
 			return fmt.Errorf("failed to prepare insert statement for table %s: %w", tableName, err)
 		}
 
+		rowCount := 0
+
 		// Insert rows using streaming ScanRows
 		err = provider.ScanRows(tableName, func(row []interface{}) error {
 			// Ensure row has the same number of columns as headers
@@ -257,6 +263,25 @@ func ImportToSQLite(provider RowProvider, dbPath string) error {
 			_, err := stmt.Exec(row...)
 			if err != nil {
 				return fmt.Errorf("failed to insert row in table %s: %w", tableName, err)
+			}
+
+			rowCount++
+			if rowCount%BatchSize == 0 {
+				stmt.Close()
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("failed to commit transaction for table %s: %w", tableName, err)
+				}
+
+				// Start new transaction
+				tx, err = db.Begin()
+				if err != nil {
+					return fmt.Errorf("failed to begin transaction: %w", err)
+				}
+				stmt, err = tx.Prepare(insertSQL)
+				if err != nil {
+					tx.Rollback()
+					return fmt.Errorf("failed to prepare insert statement for table %s: %w", tableName, err)
+				}
 			}
 			return nil
 		})

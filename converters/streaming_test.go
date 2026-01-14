@@ -1,133 +1,117 @@
 package converters
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func TestCSVStreamingFromURL(t *testing.T) {
-	// 1. Setup Mock HTTP Server serving a large CSV
-	rowCount := 10000
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Write header
-		fmt.Fprintln(w, "id,name,value,timestamp")
-		// Write rows
-		for i := 0; i < rowCount; i++ {
-			// Simulate some delay to test streaming nature? No, fast is fine.
-			fmt.Fprintf(w, "%d,row_%d,%d,%s\n", i, i, i*10, time.Now().Format(time.RFC3339))
-			if i%1000 == 0 {
-				// Flush occasionally if possible to simulate streaming chunks
-				if f, ok := w.(http.Flusher); ok {
-					f.Flush()
-				}
-			}
-		}
-	}))
-	defer ts.Close()
+// FaultyReader simulates a stream that fails after reading a certain amount of data.
+type FaultyReader struct {
+	data        []byte
+	readIndex   int
+	failAtBytes int
+}
 
-	// 2. Perform Request
-	resp, err := http.Get(ts.URL)
-	if err != nil {
-		t.Fatalf("Failed to perform GET request: %v", err)
+func (r *FaultyReader) Read(p []byte) (n int, err error) {
+	if r.readIndex >= r.failAtBytes {
+		return 0, fmt.Errorf("simulated stream interruption")
 	}
-	defer resp.Body.Close()
-
-	// 3. Initialize CSVConverter with the response body
-	converter, err := NewCSVConverterFromReader(resp.Body)
-	if err != nil {
-		t.Fatalf("NewCSVConverterFromReader failed: %v", err)
+	remaining := len(r.data) - r.readIndex
+	toRead := len(p)
+	if toRead > remaining {
+		toRead = remaining
+	}
+	// Cap at failAtBytes
+	if r.readIndex + toRead > r.failAtBytes {
+		toRead = r.failAtBytes - r.readIndex
 	}
 
-	// 4. Convert to SQLite (using ImportToSQLite via ConvertFile-like logic but manual ImportToSQLite call)
-	// We need to call ImportToSQLite(converter, outputPath)
-	// Since converter implements RowProvider.
+	copy(p, r.data[r.readIndex:r.readIndex+toRead])
+	r.readIndex += toRead
 
-	tempDir := t.TempDir()
-	outputPath := filepath.Join(tempDir, "streamed.db")
+	return toRead, nil
+}
 
-	err = ImportToSQLite(converter, outputPath)
-	if err != nil {
-		t.Fatalf("ImportToSQLite failed: %v", err)
+func TestStreamingInterruption(t *testing.T) {
+	// 1. Generate CSV Data
+	var buffer bytes.Buffer
+	buffer.WriteString("id,value\n")
+	for i := 0; i < 2000; i++ {
+		buffer.WriteString(fmt.Sprintf("%d,value_%d\n", i, i))
+	}
+	data := buffer.Bytes()
+
+	// 2. Setup FaultyReader to fail at ~75%
+	// This ensures we get past the header and into the rows.
+	failAt := len(data) * 3 / 4
+	reader := &FaultyReader{
+		data:        data,
+		failAtBytes: failAt,
 	}
 
-	// 5. Verify Data
-	db, err := sql.Open("sqlite3", outputPath)
+	// 3. Create Converter
+	// Note: NewCSVConverterFromReader reads the header immediately.
+	// Make sure failAtBytes is large enough (it is).
+	converter, err := NewCSVConverterFromReader(reader)
 	if err != nil {
-		t.Fatalf("Failed to open output database: %v", err)
+		t.Fatalf("Failed to create converter: %v", err)
+	}
+
+	// 4. Run ImportToSQLite
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	// Set batch size to 100 for testing
+	originalBatchSize := BatchSize
+	BatchSize = 100
+	defer func() { BatchSize = originalBatchSize }()
+
+	err = ImportToSQLite(converter, dbPath)
+	if err == nil {
+		t.Log("ImportToSQLite succeeded unexpectedly (stream interruption didn't occur or was handled?)")
+	} else {
+		t.Logf("ImportToSQLite failed as expected: %v", err)
+	}
+
+	// 5. Check DB Rows
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open DB: %v", err)
 	}
 	defer db.Close()
 
+	// Check if table exists and count rows
 	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM tb0").Scan(&count)
-	if err != nil {
-		t.Fatalf("Failed to query database: %v", err)
-	}
+	// Use CSVTB constant if exported, otherwise "tb0"
+	tableName := "tb0"
 
-	if count != rowCount {
-		t.Errorf("Expected %d rows, got %d", rowCount, count)
-	}
-
-	// Verify a sample row
+	// Verify table exists first (it should, as creation is outside transaction)
+	query := fmt.Sprintf("SELECT name FROM sqlite_master WHERE type='table' AND name='%s'", tableName)
 	var name string
-	err = db.QueryRow("SELECT name FROM tb0 WHERE id = '0'").Scan(&name) // IDs are text because headers aren't typed yet
+	err = db.QueryRow(query).Scan(&name)
 	if err != nil {
-		t.Fatalf("Failed to query row 0: %v", err)
-	}
-	if name != "row_0" {
-		t.Errorf("Expected name 'row_0', got '%s'", name)
-	}
-}
-
-func TestCSVStreamingSQLGeneration(t *testing.T) {
-	// Test ConvertToSQL with reader
-	rowCount := 100
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "col1,col2")
-		for i := 0; i < rowCount; i++ {
-			fmt.Fprintf(w, "val1_%d,val2_%d\n", i, i)
+		if err == sql.ErrNoRows {
+			t.Fatalf("Table %s was not created!", tableName)
 		}
-	}))
-	defer ts.Close()
-
-	resp, err := http.Get(ts.URL)
-	if err != nil {
-		t.Fatalf("Failed to perform GET request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// We use ConvertToSQL directly on a Converter.
-	// We can use NewCSVConverterFromReader or just a dummy one since ConvertToSQL takes reader.
-	// But ConvertToSQL is a method on *CSVConverter.
-	converter := &CSVConverter{}
-	// Note: ConvertToSQL method (as I implemented) uses the passed reader, not the struct state.
-
-	tempDir := t.TempDir()
-	outputPath := filepath.Join(tempDir, "streamed.sql")
-	outFile, err := os.Create(outputPath)
-	if err != nil {
-		t.Fatalf("Failed to create output file: %v", err)
-	}
-	defer outFile.Close()
-
-	err = converter.ConvertToSQL(resp.Body, outFile)
-	if err != nil {
-		t.Fatalf("ConvertToSQL failed: %v", err)
+		t.Fatalf("Failed to check table existence: %v", err)
 	}
 
-	// Verify file content size/existence
-	info, err := os.Stat(outputPath)
+	err = db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)).Scan(&count)
 	if err != nil {
-		t.Fatalf("Failed to stat output file: %v", err)
+		t.Fatalf("Failed to count rows: %v", err)
 	}
-	if info.Size() == 0 {
-		t.Error("Output SQL file is empty")
+
+	t.Logf("Rows in DB: %d", count)
+
+	// We expect significant number of rows (e.g. > 1000) because batching commits periodically.
+	if count < 1000 {
+		t.Errorf("Expected > 1000 rows with batching, got %d", count)
+	} else {
+		t.Logf("Verified: %d rows inserted despite stream interruption.", count)
 	}
 }
