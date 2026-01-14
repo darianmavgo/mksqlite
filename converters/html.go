@@ -85,7 +85,7 @@ func (c *HTMLConverter) ConvertFile(inputPath, outputPath string) error {
 	}
 	c.tableNames = GenTableNames(rawNames)
 
-	return ImportToSQLite(c, outputPath)
+	return ImportToSQLiteFile(c, outputPath)
 }
 
 // GetTableNames implements RowProvider

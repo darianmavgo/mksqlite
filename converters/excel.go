@@ -107,7 +107,7 @@ func (e *ExcelConverter) ConvertFile(inputPath, outputPath string) error {
 		rows.Close()
 	}
 
-	return ImportToSQLite(e, outputPath)
+	return ImportToSQLiteFile(e, outputPath)
 }
 
 // GetTableNames implements RowProvider
