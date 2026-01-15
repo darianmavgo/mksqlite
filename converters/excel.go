@@ -13,24 +13,24 @@ type ExcelConverter struct {
 	tableNames []string
 	headers    map[string][]string // map tableName to headers
 	sheetMap   map[string]string   // map tableName to sheetName
-	inputPath  string
+	file       *excelize.File
 }
 
 // Ensure ExcelConverter implements RowProvider
 var _ RowProvider = (*ExcelConverter)(nil)
 
-// NewExcelConverter creates a new ExcelConverter
-func NewExcelConverter(inputPath string) (*ExcelConverter, error) {
-	// Open Excel file
-	f, err := excelize.OpenFile(inputPath)
+// NewExcelConverter creates a new ExcelConverter from an io.Reader
+func NewExcelConverter(r io.Reader) (*ExcelConverter, error) {
+	// Open Excel stream
+	f, err := excelize.OpenReader(r)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open Excel file: %w", err)
+		return nil, fmt.Errorf("failed to open Excel stream: %w", err)
 	}
-	defer f.Close()
 
 	// Get all sheets
 	sheets := f.GetSheetList()
 	if len(sheets) == 0 {
+		f.Close()
 		return nil, fmt.Errorf("no sheets found in Excel file")
 	}
 
@@ -45,6 +45,7 @@ func NewExcelConverter(inputPath string) (*ExcelConverter, error) {
 		// Use iterator to get just the first row for headers
 		rows, err := f.Rows(sheetName)
 		if err != nil {
+			f.Close()
 			return nil, fmt.Errorf("failed to get rows iterator for sheet %s: %w", sheetName, err)
 		}
 
@@ -52,6 +53,7 @@ func NewExcelConverter(inputPath string) (*ExcelConverter, error) {
 			headerRow, err := rows.Columns()
 			if err != nil {
 				rows.Close()
+				f.Close()
 				return nil, fmt.Errorf("failed to read header row for sheet %s: %w", sheetName, err)
 			}
 			headersMap[tableName] = GenColumnNames(headerRow)
@@ -63,51 +65,8 @@ func NewExcelConverter(inputPath string) (*ExcelConverter, error) {
 		tableNames: tableNames,
 		headers:    headersMap,
 		sheetMap:   sheetMap,
-		inputPath:  inputPath,
+		file:       f,
 	}, nil
-}
-
-// ConvertFile implements FileConverter for Excel files (creates SQLite database)
-func (e *ExcelConverter) ConvertFile(inputPath, outputPath string) error {
-	f, err := excelize.OpenFile(inputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open Excel file: %w", err)
-	}
-	defer f.Close()
-
-	// Get all sheets
-	sheets := f.GetSheetList()
-	if len(sheets) == 0 {
-		return fmt.Errorf("no sheets found in Excel file")
-	}
-
-	e.tableNames = GenTableNames(sheets)
-	e.headers = make(map[string][]string)
-	e.sheetMap = make(map[string]string)
-	e.inputPath = inputPath
-
-	for idx, sheetName := range sheets {
-		tableName := e.tableNames[idx]
-		e.sheetMap[tableName] = sheetName
-
-		// We need headers. Use Rows iterator to just get first row.
-		rows, err := f.Rows(sheetName)
-		if err != nil {
-			return fmt.Errorf("failed to get rows for sheet %s: %w", sheetName, err)
-		}
-
-		if rows.Next() {
-			headerRow, err := rows.Columns()
-			if err != nil {
-				rows.Close()
-				return fmt.Errorf("failed to read header row for sheet %s: %w", sheetName, err)
-			}
-			e.headers[tableName] = GenColumnNames(headerRow)
-		}
-		rows.Close()
-	}
-
-	return ImportToSQLiteFile(e, outputPath)
 }
 
 // GetTableNames implements RowProvider
@@ -127,13 +86,7 @@ func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}) er
 		return nil // Should not happen if GetTableNames is correct
 	}
 
-	f, err := excelize.OpenFile(e.inputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open Excel file: %w", err)
-	}
-	defer f.Close()
-
-	rows, err := f.Rows(sheetName)
+	rows, err := e.file.Rows(sheetName)
 	if err != nil {
 		return fmt.Errorf("failed to get rows iterator for sheet %s: %w", sheetName, err)
 	}
@@ -170,6 +123,18 @@ func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}) er
 
 // ConvertToSQL implements StreamConverter for Excel files (outputs SQL to writer)
 func (e *ExcelConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
+	// Note: e.file is already open if created via NewExcelConverter.
+	// However, StreamConverter interface passes a reader.
+	// If this method is called directly without NewExcelConverter (e.g. from main's exportToSQL),
+	// we need to open the reader.
+
+	// If we are using the instance method on an empty struct, we need to open the reader.
+	// But StreamConverter interface ConvertToSQL(reader, writer) implies we might create a new converter or use the existing one?
+	// The interface is:
+	// type StreamConverter interface { ConvertToSQL(reader io.Reader, writer io.Writer) error }
+	// So `exportToSQL` creates `&ExcelConverter{}` and calls `ConvertToSQL`.
+	// In that case `e.file` is nil.
+
 	f, err := excelize.OpenReader(reader)
 	if err != nil {
 		return fmt.Errorf("failed to open Excel stream: %w", err)

@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 )
 
@@ -15,36 +14,16 @@ const (
 // CSVConverter converts CSV files to SQLite tables
 type CSVConverter struct {
 	headers   []string
-	inputPath string
 	csvReader *csv.Reader // Used for streaming from an io.Reader
 }
 
 // Ensure CSVConverter implements RowProvider
 var _ RowProvider = (*CSVConverter)(nil)
 
-// NewCSVConverter creates a new CSVConverter
-func NewCSVConverter(inputPath string) (*CSVConverter, error) {
-	file, err := os.Open(inputPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open input file: %w", err)
-	}
-	defer file.Close()
-
-	headers, err := parseCSVHeaders(file)
-	if err != nil {
-		return nil, err
-	}
-
-	return &CSVConverter{
-		headers:   headers,
-		inputPath: inputPath,
-	}, nil
-}
-
-// NewCSVConverterFromReader creates a new CSVConverter from an io.Reader.
+// NewCSVConverter creates a new CSVConverter from an io.Reader.
 // This allows streaming data from a source (e.g. HTTP response) without a local file.
 // Note: scanRows can only be called once in this mode.
-func NewCSVConverterFromReader(r io.Reader) (*CSVConverter, error) {
+func NewCSVConverter(r io.Reader) (*CSVConverter, error) {
 	reader := csv.NewReader(r)
 	headers, err := reader.Read()
 	if err != nil {
@@ -67,25 +46,6 @@ func NewCSVConverterFromReader(r io.Reader) (*CSVConverter, error) {
 	}, nil
 }
 
-// ConvertFile implements FileConverter for CSV files (creates SQLite database)
-func (c *CSVConverter) ConvertFile(inputPath, outputPath string) error {
-	file, err := os.Open(inputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open input file: %w", err)
-	}
-	defer file.Close()
-
-	headers, err := parseCSVHeaders(file)
-	if err != nil {
-		return err
-	}
-
-	c.headers = headers
-	c.inputPath = inputPath
-
-	return ImportToSQLiteFile(c, outputPath)
-}
-
 // GetTableNames implements RowProvider
 func (c *CSVConverter) GetTableNames() []string {
 	return []string{CSVTB}
@@ -105,29 +65,11 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) erro
 		return nil
 	}
 
-	var reader *csv.Reader
-	var file *os.File
-	var err error
-
-	if c.csvReader != nil {
-		// Use the existing reader (streaming mode)
-		reader = c.csvReader
-	} else {
-		// File mode
-		file, err = os.Open(c.inputPath)
-		if err != nil {
-			return fmt.Errorf("failed to open input file: %w", err)
-		}
-		defer file.Close()
-
-		reader = csv.NewReader(file)
-
-		// Read and discard headers
-		_, err = reader.Read()
-		if err != nil {
-			return fmt.Errorf("failed to read CSV headers: %w", err)
-		}
+	if c.csvReader == nil {
+		return fmt.Errorf("CSV reader is not initialized")
 	}
+
+	reader := c.csvReader
 
 	// Channel to pipeline reading and processing
 	rowsCh := make(chan []interface{}, 100)
@@ -181,26 +123,6 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) erro
 	default:
 		return nil
 	}
-}
-
-func parseCSVHeaders(reader io.Reader) ([]string, error) {
-	csvReader := csv.NewReader(reader)
-	headers, err := csvReader.Read()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CSV headers: %w", err)
-	}
-
-	// Filter out empty headers and sanitize
-	var filteredHeaders []string
-	for _, header := range headers {
-		if strings.TrimSpace(header) != "" {
-			filteredHeaders = append(filteredHeaders, strings.TrimSpace(header))
-		}
-	}
-
-	// Sanitize headers for SQL column names
-	sanitizedHeaders := GenColumnNames(filteredHeaders)
-	return sanitizedHeaders, nil
 }
 
 // ConvertToSQL implements StreamConverter for CSV files (outputs SQL to writer).

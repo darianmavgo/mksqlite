@@ -25,7 +25,7 @@ func TestCSVConvertFromURL(t *testing.T) {
 		t.Fatalf("Failed to fetch URL, status code: %d", resp.StatusCode)
 	}
 
-	converter, err := NewCSVConverterFromReader(resp.Body)
+	converter, err := NewCSVConverter(resp.Body)
 	if err != nil {
 		t.Fatalf("Failed to create converter from reader: %v", err)
 	}
@@ -33,7 +33,13 @@ func TestCSVConvertFromURL(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputPath := filepath.Join(tmpDir, "url_test.db")
 
-	err = ImportToSQLite(converter, outputPath)
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatalf("Failed to create output file: %v", err)
+	}
+	defer outFile.Close()
+
+	err = ImportToSQLite(converter, outFile)
 	if err != nil {
 		t.Logf("ImportToSQLite finished with error (possibly network interruption): %v", err)
 	} else {
@@ -64,14 +70,34 @@ func TestCSVConvertFromURL(t *testing.T) {
 }
 
 func TestCSVConvertFile(t *testing.T) {
-	converter := &CSVConverter{}
-
 	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv" // Using real sample data
 	outputPath := "../sample_out/csv_convert.db"
 
-	err := converter.ConvertFile(inputPath, outputPath)
+	// Ensure output directory exists
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+
+	file, err := os.Open(inputPath)
 	if err != nil {
-		t.Fatalf("ConvertFile failed: %v", err)
+		t.Fatalf("Failed to open input file: %v", err)
+	}
+	defer file.Close()
+
+	converter, err := NewCSVConverter(file)
+	if err != nil {
+		t.Fatalf("Failed to create CSV converter: %v", err)
+	}
+
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatalf("Failed to create output file: %v", err)
+	}
+	defer outFile.Close()
+
+	err = ImportToSQLite(converter, outFile)
+	if err != nil {
+		t.Fatalf("ImportToSQLite failed: %v", err)
 	}
 	t.Logf("CSV ConvertFile output: %s", outputPath)
 
@@ -98,6 +124,11 @@ func TestCSVConvertToSQL(t *testing.T) {
 
 	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv"
 	outputPath := "../sample_out/csv_convert.sql"
+
+	// Ensure output directory exists
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
 
 	file, err := os.Open(inputPath)
 	if err != nil {

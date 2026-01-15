@@ -22,20 +22,26 @@ type FilesystemConverter struct {
 // Ensure FilesystemConverter implements RowProvider
 var _ RowProvider = (*FilesystemConverter)(nil)
 
-// ConvertFile implements FileConverter for filesystem directories
-func (c *FilesystemConverter) ConvertFile(inputPath, outputPath string) error {
-	// Ensure input is a directory
-	info, err := os.Stat(inputPath)
+// NewFilesystemConverter creates a new FilesystemConverter from an io.Reader.
+// It requires the reader to be an *os.File to determine the directory path.
+func NewFilesystemConverter(r io.Reader) (*FilesystemConverter, error) {
+	file, ok := r.(*os.File)
+	if !ok {
+		return nil, fmt.Errorf("FilesystemConverter requires an *os.File reader to determine the directory path")
+	}
+
+	inputPath := file.Name()
+	info, err := file.Stat()
 	if err != nil {
-		return fmt.Errorf("failed to stat input path: %w", err)
+		return nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("input path is not a directory: %s", inputPath)
+		return nil, fmt.Errorf("input path is not a directory: %s", inputPath)
 	}
 
-	c.inputPath = inputPath
-
-	return ImportToSQLiteFile(c, outputPath)
+	return &FilesystemConverter{
+		inputPath: inputPath,
+	}, nil
 }
 
 // GetTableNames implements RowProvider

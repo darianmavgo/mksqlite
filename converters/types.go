@@ -9,20 +9,9 @@ type Request struct {
 	Table       string // Table name (optional, defaults to CSVTB)
 }
 
-// FileConverter defines the interface for converting files to SQLite databases
-type FileConverter interface {
-	ConvertFile(inputPath, outputPath string) error
-}
-
 // StreamConverter defines the interface for converting data streams to SQL output
 type StreamConverter interface {
 	ConvertToSQL(reader io.Reader, writer io.Writer) error
-}
-
-// Converter combines both file and stream conversion capabilities
-type Converter interface {
-	FileConverter
-	StreamConverter
 }
 
 // RowProvider defines the interface for providing data to be inserted into SQLite
