@@ -41,12 +41,28 @@ func TestFilesystemConvertFile(t *testing.T) {
 		}
 	}
 
-	converter := &FilesystemConverter{}
-	outputPath := filepath.Join(tempDir, "output.db")
-
-	err := converter.ConvertFile(tempDir, outputPath)
+	// Open the directory as a file
+	dirFile, err := os.Open(tempDir)
 	if err != nil {
-		t.Fatalf("ConvertFile failed: %v", err)
+		t.Fatalf("failed to open directory: %v", err)
+	}
+	defer dirFile.Close()
+
+	converter, err := NewFilesystemConverter(dirFile)
+	if err != nil {
+		t.Fatalf("Failed to create Filesystem converter: %v", err)
+	}
+
+	outputPath := filepath.Join(tempDir, "output.db")
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatalf("failed to create output file: %v", err)
+	}
+	defer outFile.Close()
+
+	err = ImportToSQLite(converter, outFile)
+	if err != nil {
+		t.Fatalf("ImportToSQLite failed: %v", err)
 	}
 
 	// Verify database content
@@ -97,7 +113,18 @@ func TestFilesystemConvertToSQL(t *testing.T) {
 		t.Fatalf("failed to create file: %v", err)
 	}
 
-	converter := &FilesystemConverter{}
+	// Open the directory as a file (needed for the hack)
+	dirFile, err := os.Open(tempDir)
+	if err != nil {
+		t.Fatalf("failed to open temp dir: %v", err)
+	}
+	defer dirFile.Close()
+
+	converter, err := NewFilesystemConverter(dirFile)
+	if err != nil {
+		t.Fatalf("Failed to create Filesystem converter: %v", err)
+	}
+
 	outputPath := filepath.Join(tempDir, "output.sql")
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
@@ -105,12 +132,18 @@ func TestFilesystemConvertToSQL(t *testing.T) {
 	}
 	defer outputFile.Close()
 
-	// Open the directory as a file (needed for the hack)
-	dirFile, err := os.Open(tempDir)
-	if err != nil {
-		t.Fatalf("failed to open temp dir: %v", err)
-	}
-	defer dirFile.Close()
+	// Note: ConvertToSQL also requires *os.File from reader.
+	// But we initialized converter with dirFile, which is *os.File.
+	// ConvertToSQL also takes reader, but it seems FilesystemConverter.ConvertToSQL ignores the reader argument?
+	// Let's check FilesystemConverter.ConvertToSQL.
+	// It does: `file, ok := reader.(*os.File)`.
+	// So we need to pass dirFile again (or reopen it) to ConvertToSQL.
+	// Since dirFile is already open, passing it again is fine (random access not strictly needed for the path check, but WalkDir uses path).
+	// But `ConvertToSQL` calls `file.Stat()` and `file.Name()`.
+
+	// Rewind? Not needed for Name(), Stat().
+	// But `ConvertToSQL` doesn't consume the file content, it uses the path.
+	// So passing dirFile is fine.
 
 	err = converter.ConvertToSQL(dirFile, outputFile)
 	if err != nil {

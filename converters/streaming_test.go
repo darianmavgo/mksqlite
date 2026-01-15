@@ -56,9 +56,9 @@ func TestStreamingInterruption(t *testing.T) {
 	}
 
 	// 3. Create Converter
-	// Note: NewCSVConverterFromReader reads the header immediately.
+	// Note: NewCSVConverter reads the header immediately.
 	// Make sure failAtBytes is large enough (it is).
-	converter, err := NewCSVConverterFromReader(reader)
+	converter, err := NewCSVConverter(reader)
 	if err != nil {
 		t.Fatalf("Failed to create converter: %v", err)
 	}
@@ -73,12 +73,18 @@ func TestStreamingInterruption(t *testing.T) {
 	}
 	dbPath := filepath.Join(tmpDir, "interrupted.db")
 
+	outFile, err := os.Create(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to create output file: %v", err)
+	}
+	defer outFile.Close()
+
 	// Set batch size to 100 for testing
 	originalBatchSize := BatchSize
 	BatchSize = 100
 	defer func() { BatchSize = originalBatchSize }()
 
-	err = ImportToSQLiteFile(converter, dbPath)
+	err = ImportToSQLite(converter, outFile)
 	if err == nil {
 		t.Log("ImportToSQLite succeeded unexpectedly (stream interruption didn't occur or was handled?)")
 	} else {

@@ -16,28 +16,52 @@ func FileToSQLite(inputPath, outputPath string) error {
 		return fmt.Errorf("failed to stat input path: %w", err)
 	}
 
+	var inputFile *os.File
+	inputFile, err = os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to open input: %w", err)
+	}
+	defer inputFile.Close()
+
+	var converter converters.RowProvider
+	var convErr error
+
 	if info.IsDir() {
-		converter := &converters.FilesystemConverter{}
-		return converter.ConvertFile(inputPath, outputPath)
+		converter, convErr = converters.NewFilesystemConverter(inputFile)
+	} else {
+		ext := filepath.Ext(inputPath)
+		switch ext {
+		case ".csv":
+			converter, convErr = converters.NewCSVConverter(inputFile)
+		case ".xlsx", ".xls":
+			converter, convErr = converters.NewExcelConverter(inputFile)
+		case ".zip":
+			converter, convErr = converters.NewZipConverter(inputFile)
+		case ".html", ".htm":
+			converter, convErr = converters.NewHTMLConverter(inputFile)
+		default:
+			return fmt.Errorf("unsupported file type: %s", ext)
+		}
 	}
 
-	ext := filepath.Ext(inputPath)
-	var converter converters.FileConverter
-
-	switch ext {
-	case ".csv":
-		converter = &converters.CSVConverter{}
-	case ".xlsx", ".xls":
-		converter = &converters.ExcelConverter{}
-	case ".zip":
-		converter = &converters.ZipConverter{}
-	case ".html", ".htm":
-		converter = &converters.HTMLConverter{}
-	default:
-		return fmt.Errorf("unsupported file type: %s", ext)
+	if convErr != nil {
+		return fmt.Errorf("failed to initialize converter: %w", convErr)
 	}
 
-	return converter.ConvertFile(inputPath, outputPath)
+	// Ensure output directory exists
+	dir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Create output file
+	outputFile, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer outputFile.Close()
+
+	return converters.ImportToSQLite(converter, outputFile)
 }
 
 func main() {
@@ -54,7 +78,28 @@ func main() {
 			os.Exit(1)
 		}
 		inputPath := os.Args[2]
-		err := exportToSQL(inputPath, os.Stdout)
+
+		// If output file is provided (arg 3 is output), use it, else stdout?
+		// Usage says [output_file].
+		// If 3 args: mksqlite --sql input output
+		// If 2 args (excluding --sql): wait, os.Args[0] is prog.
+		// os.Args[1] is --sql. os.Args[2] is input. os.Args[3] is output (optional).
+
+		var writer io.Writer
+		if len(os.Args) >= 4 {
+			outputPath := os.Args[3]
+			f, err := os.Create(outputPath)
+			if err != nil {
+				fmt.Printf("Error creating output file: %v\n", err)
+				os.Exit(1)
+			}
+			defer f.Close()
+			writer = f
+		} else {
+			writer = os.Stdout
+		}
+
+		err := exportToSQL(inputPath, writer)
 		if err != nil {
 			fmt.Printf("Error exporting SQL: %v\n", err)
 			os.Exit(1)
@@ -86,13 +131,14 @@ func exportToSQL(inputPath string, writer io.Writer) error {
 		return fmt.Errorf("failed to stat input path: %w", err)
 	}
 
+	file, err := os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to open input file: %w", err)
+	}
+	defer file.Close()
+
 	if info.IsDir() {
 		converter := &converters.FilesystemConverter{}
-		file, err := os.Open(inputPath)
-		if err != nil {
-			return fmt.Errorf("failed to open input directory: %w", err)
-		}
-		defer file.Close()
 		return converter.ConvertToSQL(file, writer)
 	}
 
@@ -103,22 +149,14 @@ func exportToSQL(inputPath string, writer io.Writer) error {
 	case ".csv":
 		converter = &converters.CSVConverter{}
 	case ".xlsx", ".xls":
-		fmt.Printf("Excel SQL export not yet implemented\n")
-		return fmt.Errorf("Excel SQL export not yet implemented")
+		converter = &converters.ExcelConverter{}
 	case ".zip":
-		fmt.Printf("Zip SQL export not yet implemented\n")
-		return fmt.Errorf("Zip SQL export not yet implemented")
+		converter = &converters.ZipConverter{}
 	case ".html", ".htm":
 		converter = &converters.HTMLConverter{}
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
-
-	file, err := os.Open(inputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open input file: %w", err)
-	}
-	defer file.Close()
 
 	return converter.ConvertToSQL(file, writer)
 }

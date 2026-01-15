@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -192,20 +191,49 @@ func GenCreateTableSQL(tableName string, columnNames []string) string {
 	return sql
 }
 
-// ImportToSQLiteFile imports data from a RowProvider into a SQLite database file.
-// It creates the file (and directory if needed) and populates it.
-func ImportToSQLiteFile(provider RowProvider, dbPath string) error {
-	// Ensure output directory exists
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
+// ImportToSQLite imports data from a RowProvider and writes the resulting SQLite database
+// to the provided io.Writer.
+// If writer is an *os.File, it writes directly to that file to allow partial data persistence.
+// Otherwise, it uses a temporary file for construction and copies it to the writer.
+func ImportToSQLite(provider RowProvider, writer io.Writer) error {
+	var dbPath string
+	var useTemp bool = true
+
+	// Check if writer is a file we can use directly
+	if f, ok := writer.(*os.File); ok {
+		stat, err := f.Stat()
+		// Ensure it's a regular file (not stdout/pipe)
+		if err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
+			dbPath = f.Name()
+			useTemp = false
+			// We need to close the file handle passed in?
+			// The caller owns it.
+			// SQLite will open its own handle.
+			// Ideally, we should sync and close the handle, but we can't close it as we don't own it.
+			// But if we write via SQLite, the file content changes.
+			// The file handle 'f' might have an offset. SQLite ignores that as it opens by path.
+		}
 	}
 
-	// Remove existing database file if it exists
-	if _, err := os.Stat(dbPath); err == nil {
-		if err := os.Remove(dbPath); err != nil {
-			return fmt.Errorf("failed to remove existing database: %w", err)
+	if useTemp {
+		// Create a temporary file
+		tmpFile, err := os.CreateTemp("", "mksqlite-*.db")
+		if err != nil {
+			return fmt.Errorf("failed to create temp file: %w", err)
 		}
+		dbPath = tmpFile.Name()
+		tmpFile.Close() // Close it so sql.Open can use it
+
+		defer os.Remove(dbPath) // Clean up temp file
+	} else {
+		// If writing directly to file, we should probably truncate it or ensure it's empty?
+		// ImportToSQLiteFile used to remove it.
+		// But here we received an open file handle. It might have been created with O_TRUNC.
+		// We will assume the caller prepared the file (e.g. os.Create).
+		// However, SQLite expects to manage the file structure.
+		// If 'f' is empty, it's fine.
+		// If 'f' has garbage, SQLite might fail or corrupt.
+		// We'll proceed assuming it's a new or empty file.
 	}
 
 	// Connect to SQLite database
@@ -213,50 +241,30 @@ func ImportToSQLiteFile(provider RowProvider, dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
-	defer db.Close()
-
-	return populateDB(db, provider)
-}
-
-// ImportToSQLite imports data from a RowProvider and writes the resulting SQLite database
-// to the provided io.Writer. It uses a temporary file for construction.
-func ImportToSQLite(provider RowProvider, writer io.Writer) error {
-	// Create a temporary file
-	tmpFile, err := os.CreateTemp("", "mksqlite-*.db")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	tmpFile.Close() // Close it so sql.Open can use it
-
-	defer os.Remove(tmpPath) // Clean up temp file
-
-	// Connect to SQLite database
-	db, err := sql.Open("sqlite3", tmpPath)
-	if err != nil {
-		return fmt.Errorf("failed to open temp database: %w", err)
-	}
 
 	// Populate database
-	if err := populateDB(db, provider); err != nil {
-		db.Close()
-		return err
-	}
-	db.Close() // Close before reading
+	err = populateDB(db, provider)
+	db.Close() // Close database connection
 
-	// Open temp file for reading
-	f, err := os.Open(tmpPath)
-	if err != nil {
-		return fmt.Errorf("failed to open temp file for reading: %w", err)
-	}
-	defer f.Close()
+	if useTemp {
+		if err != nil {
+			return err // If failed, don't copy
+		}
 
-	// Copy to writer
-	if _, err := io.Copy(writer, f); err != nil {
-		return fmt.Errorf("failed to write to output: %w", err)
+		// Open temp file for reading
+		f, err := os.Open(dbPath)
+		if err != nil {
+			return fmt.Errorf("failed to open temp file for reading: %w", err)
+		}
+		defer f.Close()
+
+		// Copy to writer
+		if _, err := io.Copy(writer, f); err != nil {
+			return fmt.Errorf("failed to write to output: %w", err)
+		}
 	}
 
-	return nil
+	return err
 }
 
 // populateDB handles the common logic of creating tables and inserting rows

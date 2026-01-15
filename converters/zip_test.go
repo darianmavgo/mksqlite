@@ -60,17 +60,41 @@ func createTestZip(t *testing.T, path string) {
 }
 
 func TestZipConvertFile(t *testing.T) {
-	converter := &ZipConverter{}
-
 	inputPath := "../sample_data/test_archive.zip"
 	outputPath := "../sample_out/zip_convert.db"
+
+	// Clean up potential old files
+	os.Remove(inputPath)
+	os.Remove(outputPath)
 
 	createTestZip(t, inputPath)
 	defer os.Remove(inputPath)
 
-	err := converter.ConvertFile(inputPath, outputPath)
+	file, err := os.Open(inputPath)
 	if err != nil {
-		t.Fatalf("ConvertFile failed: %v", err)
+		t.Fatalf("Failed to open input file: %v", err)
+	}
+	defer file.Close()
+
+	converter, err := NewZipConverter(file)
+	if err != nil {
+		t.Fatalf("Failed to create Zip converter: %v", err)
+	}
+
+	// Ensure output directory exists
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatalf("Failed to create output file: %v", err)
+	}
+	defer outFile.Close()
+
+	err = ImportToSQLite(converter, outFile)
+	if err != nil {
+		t.Fatalf("ImportToSQLite failed: %v", err)
 	}
 	t.Logf("Zip ConvertFile output: %s", outputPath)
 

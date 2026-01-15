@@ -3,7 +3,6 @@ package converters
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -24,15 +23,9 @@ type tableData struct {
 // Ensure HTMLConverter implements RowProvider
 var _ RowProvider = (*HTMLConverter)(nil)
 
-// NewHTMLConverter creates a new HTMLConverter
-func NewHTMLConverter(inputPath string) (*HTMLConverter, error) {
-	file, err := os.Open(inputPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open input file: %w", err)
-	}
-	defer file.Close()
-
-	tables, err := parseHTML(file)
+// NewHTMLConverter creates a new HTMLConverter from an io.Reader
+func NewHTMLConverter(r io.Reader) (*HTMLConverter, error) {
+	tables, err := parseHTML(r)
 	if err != nil {
 		return nil, err
 	}
@@ -54,40 +47,6 @@ func NewHTMLConverter(inputPath string) (*HTMLConverter, error) {
 	}, nil
 }
 
-// ConvertFile implements FileConverter for HTML files (creates SQLite database)
-func (c *HTMLConverter) ConvertFile(inputPath, outputPath string) error {
-	// Re-initialize for simplicity in migration
-	file, err := os.Open(inputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open input file: %w", err)
-	}
-	defer file.Close()
-
-	tables, err := parseHTML(file)
-	if err != nil {
-		return err
-	}
-
-	if len(tables) == 0 {
-		return fmt.Errorf("no tables found in HTML")
-	}
-
-	c.tables = tables
-
-	// Generate table names
-	rawNames := make([]string, len(tables))
-	for i, t := range tables {
-		if t.rawName != "" {
-			rawNames[i] = t.rawName
-		} else {
-			rawNames[i] = fmt.Sprintf("table%d", i)
-		}
-	}
-	c.tableNames = GenTableNames(rawNames)
-
-	return ImportToSQLiteFile(c, outputPath)
-}
-
 // GetTableNames implements RowProvider
 func (c *HTMLConverter) GetTableNames() []string {
 	return c.tableNames
@@ -97,11 +56,6 @@ func (c *HTMLConverter) GetTableNames() []string {
 func (c *HTMLConverter) GetHeaders(tableName string) []string {
 	for i, name := range c.tableNames {
 		if name == tableName {
-			// Sanitize headers here as ImportToSQLite expects clean headers?
-			// ImportToSQLite does not sanitize headers, it calls GenCreateTableSQL which calls GenColumnTypes.
-			// However, ImportToSQLite passes headers to GenPreparedStmt and GenCreateTableSQL.
-			// The original code called GenColumnNames inside ConvertFile.
-			// So we should return sanitized headers here.
 			return GenColumnNames(c.tables[i].headers)
 		}
 	}
@@ -234,12 +188,6 @@ func parseHTML(reader io.Reader) ([]tableData, error) {
 		if n.Type == html.ElementNode && n.Data == "table" {
 			t := extractTable(n)
 			tables = append(tables, t)
-			// Don't traverse inside this table looking for more tables
-			// (nested tables are handled by recursion but we want to flatten or treat them?
-			// Current logic: we extract this table. If we want to find tables inside this table, we should continue recursion.
-			// But extractTable does not consume the node from the tree, so we can continue recursion if we want nested tables to also be top-level tables.
-			// However, extractTable traverses children.
-			// Let's recurse to find nested tables as separate entities.
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			f(c)
@@ -268,16 +216,12 @@ func extractTable(n *html.Node) tableData {
 					row = append(row, extractText(c))
 				}
 			}
-			// Add row even if empty? Tables might have empty rows.
-			// But meaningful data usually has cells.
-			// If row is empty []string{}, it might cause issues later if we expect it to match headers.
-			// But loop above ensures we just capture what's there.
 			rows = append(rows, row)
 			return // Don't look for TRs inside TRs
 		}
 
 		for c := node.FirstChild; c != nil; c = c.NextSibling {
-			// Don't traverse into nested tables here, they are handled by main loop
+			// Don't traverse into nested tables here
 			if c.Type == html.ElementNode && c.Data == "table" {
 				continue
 			}
@@ -305,10 +249,5 @@ func extractText(n *html.Node) string {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		text += extractText(c)
 	}
-	// We might want to just concatenate without trim for inline elements,
-	// but generally for table cells, trimming leading/trailing whitespace is good.
-	// However, we should be careful about internal whitespace.
-	// The simple concatenation preserves internal whitespace.
-	// The final result should be trimmed.
 	return strings.TrimSpace(text)
 }
