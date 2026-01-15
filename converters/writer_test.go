@@ -75,12 +75,12 @@ func TestImportToSQLiteWriter(t *testing.T) {
 		t.Errorf("Invalid SQLite header: got %q, want prefix %q", header[:16], expectedHeader)
 	}
 
-	// Verify content by writing to a temp file and opening it
-	tmpFile, err := os.CreateTemp("", "test-verify-*.db")
+	// Verify content by writing to a persistent file and opening it
+	outputPath := "../sample_out/writer_verify.db"
+	tmpFile, err := os.Create(outputPath)
 	if err != nil {
-		t.Fatalf("Failed to create temp verification file: %v", err)
+		t.Fatalf("Failed to create verification file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
 
 	if _, err := io.Copy(tmpFile, bytes.NewReader(buf.Bytes())); err != nil {
 		t.Fatalf("Failed to write buffer to file: %v", err)
@@ -88,7 +88,7 @@ func TestImportToSQLiteWriter(t *testing.T) {
 	tmpFile.Close()
 
 	// Open the verification DB
-	db, err := sql.Open("sqlite3", tmpFile.Name())
+	db, err := sql.Open("sqlite3", outputPath)
 	if err != nil {
 		t.Fatalf("Failed to open verification DB: %v", err)
 	}

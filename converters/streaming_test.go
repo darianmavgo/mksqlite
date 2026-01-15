@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -63,8 +64,14 @@ func TestStreamingInterruption(t *testing.T) {
 	}
 
 	// 4. Run ImportToSQLite
-	tmpDir := t.TempDir()
-	dbPath := filepath.Join(tmpDir, "test.db")
+	tmpDir := "../sample_out/streaming_test"
+	if err := os.RemoveAll(tmpDir); err != nil {
+		t.Fatalf("Failed to clean tmp dir: %v", err)
+	}
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		t.Fatalf("Failed to create tmp dir: %v", err)
+	}
+	dbPath := filepath.Join(tmpDir, "interrupted.db")
 
 	// Set batch size to 100 for testing
 	originalBatchSize := BatchSize
