@@ -11,8 +11,14 @@ import (
 )
 
 func TestFilesystemConvertFile(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir := t.TempDir()
+	// Create a persistent directory for testing
+	tempDir := "../sample_out/filesystem_test"
+	if err := os.RemoveAll(tempDir); err != nil {
+		t.Fatalf("failed to clean temp dir: %v", err)
+	}
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
 
 	// Create some files
 	files := []struct {
@@ -91,8 +97,14 @@ func TestFilesystemConvertFile(t *testing.T) {
 }
 
 func TestFilesystemConvertToSQL(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir := t.TempDir()
+	// Create a persistent directory for testing
+	tempDir := "../sample_out/filesystem_test_sql"
+	if err := os.RemoveAll(tempDir); err != nil {
+		t.Fatalf("failed to clean temp dir: %v", err)
+	}
+	if err := os.MkdirAll(tempDir, 0755); err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
 
 	// Create a file
 	path := filepath.Join(tempDir, "test.txt")
