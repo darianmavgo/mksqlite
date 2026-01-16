@@ -3,8 +3,8 @@ package csv_test
 import (
 	"fmt"
 	"io"
-	"mksqlite/converters"
-	"mksqlite/converters/csv"
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/csv"
 	"net/http"
 	"os"
 	"path/filepath"

@@ -3,8 +3,8 @@ package txt_test
 import (
 	"fmt"
 	"io"
-	"mksqlite/converters"
-	"mksqlite/converters/txt"
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/txt"
 	"net/http"
 	"os"
 	"path/filepath"

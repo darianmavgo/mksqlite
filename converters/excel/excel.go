@@ -3,8 +3,8 @@ package excel
 import (
 	"fmt"
 	"io"
-	"mksqlite/converters"
-	"mksqlite/converters/common"
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/common"
 	"strings"
 
 	"github.com/xuri/excelize/v2"

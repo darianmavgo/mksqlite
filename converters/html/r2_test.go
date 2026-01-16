@@ -3,8 +3,8 @@ package html_test
 import (
 	"fmt"
 	"io"
-	"mksqlite/converters"
-	"mksqlite/converters/html"
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/html"
 	"net/http"
 	"os"
 	"path/filepath"

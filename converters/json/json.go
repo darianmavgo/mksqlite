@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mksqlite/converters"
-	"mksqlite/converters/common"
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/common"
 	"sort"
 	"strings"
 )

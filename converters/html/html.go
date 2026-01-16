@@ -3,8 +3,8 @@ package html
 import (
 	"fmt"
 	"io"
-	"mksqlite/converters"
-	"mksqlite/converters/common"
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/common"
 	"strings"
 
 	"golang.org/x/net/html"

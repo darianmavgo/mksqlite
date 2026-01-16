@@ -3,8 +3,8 @@ package excel_test
 import (
 	"fmt"
 	"io"
-	"mksqlite/converters"
-	"mksqlite/converters/excel"
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/excel"
 	"net/http"
 	"os"
 	"path/filepath"

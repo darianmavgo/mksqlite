@@ -3,7 +3,7 @@ package csv
 import (
 	"database/sql"
 	"fmt"
-	"mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters"
 	"net/http"
 	"os"
 	"path/filepath"

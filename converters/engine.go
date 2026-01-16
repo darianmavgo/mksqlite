@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"mksqlite/converters/common"
+	"github.com/darianmavgo/mksqlite/converters/common"
 	"os"
 
 	_ "github.com/mattn/go-sqlite3"

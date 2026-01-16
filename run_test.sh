@@ -1,1 +1,1 @@
-go test -test.fullpath=true -timeout 30s -run ^TestGenTablesNames$ mksqlite/converters
+go test -test.fullpath=true -timeout 30s -run ^TestGenTablesNames$ github.com/darianmavgo/mksqlite/converters/common

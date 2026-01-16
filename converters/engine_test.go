@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"io"
-	"mksqlite/converters/common"
+	"github.com/darianmavgo/mksqlite/converters/common"
 	"os"
 	"testing"
 

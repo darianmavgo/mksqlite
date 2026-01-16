@@ -2,7 +2,7 @@ package filesystem
 
 import (
 	"database/sql"
-	"mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters"
 	"os"
 	"path/filepath"
 	"strings"

@@ -3,7 +3,7 @@ package converters
 import (
 	"fmt"
 	"io"
-	"mksqlite/converters/common"
+	"github.com/darianmavgo/mksqlite/converters/common"
 	"sort"
 	"sync"
 )

@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"mksqlite/converters"
-	"mksqlite/converters/common"
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/common"
 	"strings"
 )
 
