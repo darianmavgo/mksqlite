@@ -5,56 +5,58 @@ import (
 	"io"
 	"mksqlite/converters"
 	"mksqlite/converters/common"
-	"mksqlite/converters/csv"
-	"mksqlite/converters/excel"
-	"mksqlite/converters/filesystem"
-	"mksqlite/converters/html"
-	"mksqlite/converters/json"
-	"mksqlite/converters/zip"
+	_ "mksqlite/converters/csv"
+	_ "mksqlite/converters/excel"
+	_ "mksqlite/converters/filesystem"
+	_ "mksqlite/converters/html"
+	_ "mksqlite/converters/json"
+	_ "mksqlite/converters/zip"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+func getDriverName(path string, isDir bool) (string, error) {
+	if isDir {
+		return "filesystem", nil
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".csv":
+		return "csv", nil
+	case ".xlsx", ".xls":
+		return "excel", nil
+	case ".zip":
+		return "zip", nil
+	case ".html", ".htm":
+		return "html", nil
+	case ".json":
+		return "json", nil
+	}
+	return "", fmt.Errorf("unsupported file type: %s", ext)
+}
 
 // FileToSQLite converts a file to SQLite using the appropriate converter
 func FileToSQLite(inputPath, outputPath string) error {
-	// Check if input is a directory
 	info, err := os.Stat(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat input path: %w", err)
 	}
 
-	var inputFile *os.File
-	inputFile, err = os.Open(inputPath)
+	driverName, err := getDriverName(inputPath, info.IsDir())
+	if err != nil {
+		return err
+	}
+
+	inputFile, err := os.Open(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to open input: %w", err)
 	}
 	defer inputFile.Close()
 
-	var converter common.RowProvider
-	var convErr error
-
-	if info.IsDir() {
-		converter, convErr = filesystem.NewFilesystemConverter(inputFile)
-	} else {
-		ext := filepath.Ext(inputPath)
-		switch ext {
-		case ".csv":
-			converter, convErr = csv.NewCSVConverter(inputFile)
-		case ".xlsx", ".xls":
-			converter, convErr = excel.NewExcelConverter(inputFile)
-		case ".zip":
-			converter, convErr = zip.NewZipConverter(inputFile)
-		case ".html", ".htm":
-			converter, convErr = html.NewHTMLConverter(inputFile)
-		case ".json":
-			converter, convErr = json.NewJSONConverter(inputFile)
-		default:
-			return fmt.Errorf("unsupported file type: %s", ext)
-		}
-	}
-
-	if convErr != nil {
-		return fmt.Errorf("failed to initialize converter: %w", convErr)
+	converter, err := converters.Open(driverName, inputFile)
+	if err != nil {
+		return fmt.Errorf("failed to initialize converter: %w", err)
 	}
 
 	// Clean up converter resources if it implements io.Closer
@@ -78,6 +80,42 @@ func FileToSQLite(inputPath, outputPath string) error {
 	return converters.ImportToSQLite(converter, outputFile)
 }
 
+// exportToSQL exports a file as SQL statements to writer
+func exportToSQL(inputPath string, writer io.Writer) error {
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat input path: %w", err)
+	}
+
+	driverName, err := getDriverName(inputPath, info.IsDir())
+	if err != nil {
+		return err
+	}
+
+	file, err := os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to open input file: %w", err)
+	}
+	defer file.Close()
+
+	converter, err := converters.Open(driverName, file)
+	if err != nil {
+		return fmt.Errorf("failed to initialize converter: %w", err)
+	}
+
+	// Clean up converter resources if it implements io.Closer
+	if c, ok := converter.(io.Closer); ok {
+		defer c.Close()
+	}
+
+	streamConv, ok := converter.(common.StreamConverter)
+	if !ok {
+		return fmt.Errorf("converter for %s does not support SQL export", driverName)
+	}
+
+	return streamConv.ConvertToSQL(writer)
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage:")
@@ -92,12 +130,6 @@ func main() {
 			os.Exit(1)
 		}
 		inputPath := os.Args[2]
-
-		// If output file is provided (arg 3 is output), use it, else stdout?
-		// Usage says [output_file].
-		// If 3 args: mksqlite --sql input output
-		// If 2 args (excluding --sql): wait, os.Args[0] is prog.
-		// os.Args[1] is --sql. os.Args[2] is input. os.Args[3] is output (optional).
 
 		var writer io.Writer
 		if len(os.Args) >= 4 {
@@ -135,44 +167,4 @@ func main() {
 
 		fmt.Printf("Successfully converted %s to %s\n", inputPath, outputPath)
 	}
-}
-
-// exportToSQL exports a file as SQL statements to writer
-func exportToSQL(inputPath string, writer io.Writer) error {
-	// Check if input is a directory
-	info, err := os.Stat(inputPath)
-	if err != nil {
-		return fmt.Errorf("failed to stat input path: %w", err)
-	}
-
-	file, err := os.Open(inputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open input file: %w", err)
-	}
-	defer file.Close()
-
-	if info.IsDir() {
-		converter := &filesystem.FilesystemConverter{}
-		return converter.ConvertToSQL(file, writer)
-	}
-
-	ext := filepath.Ext(inputPath)
-	var converter common.StreamConverter
-
-	switch ext {
-	case ".csv":
-		converter = &csv.CSVConverter{}
-	case ".xlsx", ".xls":
-		converter = &excel.ExcelConverter{}
-	case ".zip":
-		converter = &zip.ZipConverter{}
-	case ".html", ".htm":
-		converter = &html.HTMLConverter{}
-	case ".json":
-		converter = &json.JSONConverter{}
-	default:
-		return fmt.Errorf("unsupported file type: %s", ext)
-	}
-
-	return converter.ConvertToSQL(file, writer)
 }

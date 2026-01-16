@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"mksqlite/converters"
 	"mksqlite/converters/common"
 	"strings"
 )
@@ -11,6 +12,16 @@ import (
 const (
 	CSVTB = "tb0"
 )
+
+func init() {
+	converters.Register("csv", &csvDriver{})
+}
+
+type csvDriver struct{}
+
+func (d *csvDriver) Open(source io.Reader) (common.RowProvider, error) {
+	return NewCSVConverter(source)
+}
 
 var emptyPadding = make([]string, 1024)
 
@@ -22,6 +33,9 @@ type CSVConverter struct {
 
 // Ensure CSVConverter implements RowProvider
 var _ common.RowProvider = (*CSVConverter)(nil)
+
+// Ensure CSVConverter implements StreamConverter
+var _ common.StreamConverter = (*CSVConverter)(nil)
 
 // NewCSVConverter creates a new CSVConverter from an io.Reader.
 // This allows streaming data from a source (e.g. HTTP response) without a local file.
@@ -138,26 +152,13 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) erro
 
 // ConvertToSQL implements StreamConverter for CSV files (outputs SQL to writer).
 // It uses concurrency to pipeline reading and writing.
-func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
-	csvReader := csv.NewReader(reader)
-	csvReader.FieldsPerRecord = -1 // Allow variable number of fields
-	headers, err := csvReader.Read()
-	if err != nil {
-		return fmt.Errorf("failed to read CSV headers: %w", err)
+func (c *CSVConverter) ConvertToSQL(writer io.Writer) error {
+	if c.csvReader == nil {
+		return fmt.Errorf("CSV reader is not initialized")
 	}
-
-	// Filter out empty headers and sanitize
-	var filteredHeaders []string
-	for _, header := range headers {
-		if strings.TrimSpace(header) != "" {
-			filteredHeaders = append(filteredHeaders, strings.TrimSpace(header))
-		}
-	}
-
-	sanitizedHeaders := common.GenColumnNames(filteredHeaders)
 
 	// Write CREATE TABLE statement
-	createTableSQL := common.GenCreateTableSQL(CSVTB, sanitizedHeaders)
+	createTableSQL := common.GenCreateTableSQL(CSVTB, c.headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
@@ -170,7 +171,7 @@ func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 	go func() {
 		defer close(rowsCh)
 		for {
-			row, err := csvReader.Read()
+			row, err := c.csvReader.Read()
 			if err != nil {
 				if err == io.EOF {
 					break
@@ -180,7 +181,7 @@ func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 			}
 
 			// Ensure row has the same number of columns as sanitized headers
-			row = padRow(row, len(sanitizedHeaders))
+			row = padRow(row, len(c.headers))
 
 			rowsCh <- row
 		}
@@ -193,7 +194,7 @@ func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 		}
 
 		// Write column names
-		for i, header := range sanitizedHeaders {
+		for i, header := range c.headers {
 			if i > 0 {
 				if _, err := writer.Write([]byte(", ")); err != nil {
 					return fmt.Errorf("failed to write column separator: %w", err)

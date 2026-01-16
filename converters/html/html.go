@@ -3,11 +3,22 @@ package html
 import (
 	"fmt"
 	"io"
+	"mksqlite/converters"
 	"mksqlite/converters/common"
 	"strings"
 
 	"golang.org/x/net/html"
 )
+
+func init() {
+	converters.Register("html", &htmlDriver{})
+}
+
+type htmlDriver struct{}
+
+func (d *htmlDriver) Open(source io.Reader) (common.RowProvider, error) {
+	return NewHTMLConverter(source)
+}
 
 // HTMLConverter converts HTML files to SQLite tables
 type HTMLConverter struct {
@@ -23,6 +34,9 @@ type tableData struct {
 
 // Ensure HTMLConverter implements RowProvider
 var _ common.RowProvider = (*HTMLConverter)(nil)
+
+// Ensure HTMLConverter implements StreamConverter
+var _ common.StreamConverter = (*HTMLConverter)(nil)
 
 // NewHTMLConverter creates a new HTMLConverter from an io.Reader
 func NewHTMLConverter(r io.Reader) (*HTMLConverter, error) {
@@ -84,34 +98,19 @@ func (c *HTMLConverter) ScanRows(tableName string, yield func([]interface{}) err
 }
 
 // ConvertToSQL implements StreamConverter for HTML files (outputs SQL to writer)
-func (c *HTMLConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
-	tables, err := parseHTML(reader)
-	if err != nil {
-		return err
-	}
-
-	if len(tables) == 0 {
+func (c *HTMLConverter) ConvertToSQL(writer io.Writer) error {
+	if len(c.tables) == 0 {
 		return fmt.Errorf("no tables found in HTML")
 	}
 
-	// Generate table names
-	rawNames := make([]string, len(tables))
-	for i, t := range tables {
-		if t.rawName != "" {
-			rawNames[i] = t.rawName
-		} else {
-			rawNames[i] = fmt.Sprintf("table%d", i)
-		}
-	}
-	tableNames := common.GenTableNames(rawNames)
-
-	for i, t := range tables {
+	for i, t := range c.tables {
 		if len(t.headers) == 0 && len(t.rows) == 0 {
 			continue
 		}
 
+		tableName := c.tableNames[i]
 		sanitizedHeaders := common.GenColumnNames(t.headers)
-		if err := writeHTMLTableSQL(tableNames[i], sanitizedHeaders, t.rows, writer); err != nil {
+		if err := writeHTMLTableSQL(tableName, sanitizedHeaders, t.rows, writer); err != nil {
 			return err
 		}
 	}

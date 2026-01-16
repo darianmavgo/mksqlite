@@ -3,11 +3,22 @@ package excel
 import (
 	"fmt"
 	"io"
+	"mksqlite/converters"
 	"mksqlite/converters/common"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
 )
+
+func init() {
+	converters.Register("excel", &excelDriver{})
+}
+
+type excelDriver struct{}
+
+func (d *excelDriver) Open(source io.Reader) (common.RowProvider, error) {
+	return NewExcelConverter(source)
+}
 
 // ExcelConverter converts Excel files to SQLite tables
 type ExcelConverter struct {
@@ -19,6 +30,12 @@ type ExcelConverter struct {
 
 // Ensure ExcelConverter implements RowProvider
 var _ common.RowProvider = (*ExcelConverter)(nil)
+
+// Ensure ExcelConverter implements StreamConverter
+var _ common.StreamConverter = (*ExcelConverter)(nil)
+
+// Ensure ExcelConverter implements io.Closer
+var _ io.Closer = (*ExcelConverter)(nil)
 
 // NewExcelConverter creates a new ExcelConverter from an io.Reader
 func NewExcelConverter(r io.Reader) (*ExcelConverter, error) {
@@ -122,79 +139,34 @@ func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}) er
 	return nil
 }
 
+// Close closes the underlying Excel file
+func (e *ExcelConverter) Close() error {
+	if e.file != nil {
+		return e.file.Close()
+	}
+	return nil
+}
+
 // ConvertToSQL implements StreamConverter for Excel files (outputs SQL to writer)
-func (e *ExcelConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
-	// Note: e.file is already open if created via NewExcelConverter.
-	// However, StreamConverter interface passes a reader.
-	// If this method is called directly without NewExcelConverter (e.g. from main's exportToSQL),
-	// we need to open the reader.
-
-	// If we are using the instance method on an empty struct, we need to open the reader.
-	// But StreamConverter interface ConvertToSQL(reader, writer) implies we might create a new converter or use the existing one?
-	// The interface is:
-	// type StreamConverter interface { ConvertToSQL(reader io.Reader, writer io.Writer) error }
-	// So `exportToSQL` creates `&ExcelConverter{}` and calls `ConvertToSQL`.
-	// In that case `e.file` is nil.
-
-	f, err := excelize.OpenReader(reader)
-	if err != nil {
-		return fmt.Errorf("failed to open Excel stream: %w", err)
-	}
-	defer f.Close()
-
-	sheets := f.GetSheetList()
-	if len(sheets) == 0 {
-		return fmt.Errorf("no sheets found in Excel stream")
+func (e *ExcelConverter) ConvertToSQL(writer io.Writer) error {
+	if e.file == nil {
+		return fmt.Errorf("ExcelConverter not initialized")
 	}
 
-	tableNames := common.GenTableNames(sheets)
-
-	for idx, sheetName := range sheets {
-		tableName := tableNames[idx]
-
-		rows, err := f.Rows(sheetName)
-		if err != nil {
-			return fmt.Errorf("failed to get rows for sheet %s: %w", sheetName, err)
-		}
-
-		var headers []string
-		if rows.Next() {
-			headerRow, err := rows.Columns()
-			if err != nil {
-				rows.Close()
-				return fmt.Errorf("failed to read header row for sheet %s: %w", sheetName, err)
-			}
-			headers = common.GenColumnNames(headerRow)
-		} else {
-			rows.Close()
-			continue // Skip empty sheet
+	for _, tableName := range e.tableNames {
+		headers := e.headers[tableName]
+		if len(headers) == 0 {
+			continue // Skip empty tables
 		}
 
 		// Write CREATE TABLE statement
 		createTableSQL := common.GenCreateTableSQL(tableName, headers)
 		if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
-			rows.Close()
 			return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 		}
 
-		for rows.Next() {
-			row, err := rows.Columns()
-			if err != nil {
-				rows.Close()
-				return fmt.Errorf("failed to read row: %w", err)
-			}
-
-			// Ensure row matches headers length
-			if len(row) < len(headers) {
-				for len(row) < len(headers) {
-					row = append(row, "")
-				}
-			} else if len(row) > len(headers) {
-				row = row[:len(headers)]
-			}
-
+		err := e.ScanRows(tableName, func(row []interface{}) error {
 			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", tableName); err != nil {
-				rows.Close()
 				return fmt.Errorf("failed to write INSERT start: %w", err)
 			}
 
@@ -202,18 +174,15 @@ func (e *ExcelConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error 
 			for i, header := range headers {
 				if i > 0 {
 					if _, err := writer.Write([]byte(", ")); err != nil {
-						rows.Close()
 						return fmt.Errorf("failed to write column separator: %w", err)
 					}
 				}
 				if _, err := fmt.Fprintf(writer, "%s", header); err != nil {
-					rows.Close()
 					return fmt.Errorf("failed to write column name: %w", err)
 				}
 			}
 
 			if _, err := fmt.Fprintf(writer, ") VALUES ("); err != nil {
-				rows.Close()
 				return fmt.Errorf("failed to write VALUES start: %w", err)
 			}
 
@@ -221,24 +190,35 @@ func (e *ExcelConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error 
 			for i, val := range row {
 				if i > 0 {
 					if _, err := writer.Write([]byte(", ")); err != nil {
-						rows.Close()
 						return fmt.Errorf("failed to write value separator: %w", err)
 					}
 				}
+
+				// Handle value types. Excelize returns strings for everything usually, but ScanRows returns interface{}.
+				strVal := ""
+				switch v := val.(type) {
+				case string:
+					strVal = v
+				default:
+					strVal = fmt.Sprintf("%v", v)
+				}
+
 				// Escape single quotes by doubling them
-				escapedVal := strings.ReplaceAll(val, "'", "''")
+				escapedVal := strings.ReplaceAll(strVal, "'", "''")
 				if _, err := fmt.Fprintf(writer, "'%s'", escapedVal); err != nil {
-					rows.Close()
 					return fmt.Errorf("failed to write value: %w", err)
 				}
 			}
 
 			if _, err := writer.Write([]byte(");\n")); err != nil {
-				rows.Close()
 				return fmt.Errorf("failed to write statement end: %w", err)
 			}
+			return nil
+		})
+
+		if err != nil {
+			return err
 		}
-		rows.Close()
 
 		if _, err := writer.Write([]byte("\n")); err != nil {
 			return fmt.Errorf("failed to write table separator: %w", err)

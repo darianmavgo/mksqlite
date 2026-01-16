@@ -128,8 +128,6 @@ func TestCSVConvertFile(t *testing.T) {
 }
 
 func TestCSVConvertToSQL(t *testing.T) {
-	converter := &CSVConverter{}
-
 	inputPath := "../../sample_data/demo_mavgo_flight/Expenses.csv"
 	outputPath := "../../sample_out/csv_convert.sql"
 
@@ -144,13 +142,18 @@ func TestCSVConvertToSQL(t *testing.T) {
 	}
 	defer file.Close()
 
+	converter, err := NewCSVConverter(file)
+	if err != nil {
+		t.Fatalf("Failed to create converter: %v", err)
+	}
+
 	outFile, err := os.Create(outputPath)
 	if err != nil {
 		t.Fatalf("Failed to create output file: %v", err)
 	}
 	defer outFile.Close()
 
-	err = converter.ConvertToSQL(file, outFile)
+	err = converter.ConvertToSQL(outFile)
 	if err != nil {
 		t.Fatalf("ConvertToSQL failed: %v", err)
 	}

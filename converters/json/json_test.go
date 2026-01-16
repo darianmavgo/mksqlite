@@ -184,8 +184,11 @@ func TestJSONConvertToSQL(t *testing.T) {
 	reader := strings.NewReader(jsonContent)
 
 	var buf strings.Builder
-	conv := &JSONConverter{}
-	err := conv.ConvertToSQL(reader, &buf)
+	conv, err := NewJSONConverter(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = conv.ConvertToSQL(&buf)
 	if err != nil {
 		t.Fatal(err)
 	}
