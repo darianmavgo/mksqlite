@@ -2,7 +2,6 @@ package converters
 
 import (
 	"archive/zip"
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -13,15 +12,26 @@ import (
 // ZipConverter converts ZIP archive file lists to SQLite tables
 type ZipConverter struct {
 	zipReader *zip.Reader
+	tempFile  *os.File // To be cleaned up if a temp file was used
 }
 
 // Ensure ZipConverter implements RowProvider
 var _ RowProvider = (*ZipConverter)(nil)
 
+// Close closes and removes the temporary file if it exists.
+func (z *ZipConverter) Close() error {
+	if z.tempFile != nil {
+		z.tempFile.Close()
+		return os.Remove(z.tempFile.Name())
+	}
+	return nil
+}
+
 // NewZipConverter creates a new ZipConverter from an io.Reader
 func NewZipConverter(r io.Reader) (*ZipConverter, error) {
 	var zipReader *zip.Reader
 	var err error
+	var tempFile *os.File
 
 	if f, ok := r.(*os.File); ok {
 		info, err := f.Stat()
@@ -30,20 +40,37 @@ func NewZipConverter(r io.Reader) (*ZipConverter, error) {
 		}
 		zipReader, err = zip.NewReader(f, info.Size())
 	} else {
-		// Read fully into memory
-		data, err := io.ReadAll(r)
+		// Create temp file instead of reading fully into memory
+		tempFile, err = os.CreateTemp("", "mksqlite-zip-*.zip")
 		if err != nil {
-			return nil, fmt.Errorf("failed to read stream: %w", err)
+			return nil, fmt.Errorf("failed to create temp file: %w", err)
 		}
-		readerAt := bytes.NewReader(data)
-		zipReader, err = zip.NewReader(readerAt, int64(len(data)))
+
+		// Clean up on error
+		cleanup := func() {
+			tempFile.Close()
+			os.Remove(tempFile.Name())
+		}
+
+		if _, err := io.Copy(tempFile, r); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("failed to copy stream to temp file: %w", err)
+		}
+
+		info, err := tempFile.Stat()
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("failed to stat temp file: %w", err)
+		}
+
+		zipReader, err = zip.NewReader(tempFile, info.Size())
+		if err != nil {
+			cleanup()
+			return nil, fmt.Errorf("failed to create zip reader: %w", err)
+		}
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to create zip reader: %w", err)
-	}
-
-	return &ZipConverter{zipReader: zipReader}, nil
+	return &ZipConverter{zipReader: zipReader, tempFile: tempFile}, nil
 }
 
 // GetTableNames implements RowProvider
@@ -100,16 +127,8 @@ func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}) erro
 }
 
 // ConvertToSQL implements StreamConverter for ZIP files
-// Note: This requires reading the entire content into memory or using a temp file
-// because zip.NewReader requires io.ReaderAt and size.
-// For now, we will return an error similar to ExcelConverter.
 func (z *ZipConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
-	// If this method is called, we need to initialize a reader from the input stream
-	// if z.zipReader is nil.
-	// But usually this is called on a new instance.
-
 	var zipReader *zip.Reader
-	var err error
 
 	if f, ok := reader.(*os.File); ok {
 		info, err := f.Stat()
@@ -118,21 +137,30 @@ func (z *ZipConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 		}
 		zipReader, err = zip.NewReader(f, info.Size())
 	} else {
-		// Read fully into memory
-		data, err := io.ReadAll(reader)
+		// Create temp file instead of reading fully into memory
+		tempFile, err := os.CreateTemp("", "mksqlite-zip-stream-*.zip")
 		if err != nil {
-			return fmt.Errorf("failed to read stream: %w", err)
+			return fmt.Errorf("failed to create temp file: %w", err)
 		}
-		readerAt := bytes.NewReader(data)
-		zipReader, err = zip.NewReader(readerAt, int64(len(data)))
-	}
+		defer func() {
+			tempFile.Close()
+			os.Remove(tempFile.Name())
+		}()
 
-	if err != nil {
-		return fmt.Errorf("failed to create zip reader: %w", err)
-	}
+		if _, err := io.Copy(tempFile, reader); err != nil {
+			return fmt.Errorf("failed to copy stream to temp file: %w", err)
+		}
 
-	// Now we can reuse the logic to write SQL
-	// But StreamConverter writes SQL text, not populating SQLite DB directly.
+		info, err := tempFile.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat temp file: %w", err)
+		}
+
+		zipReader, err = zip.NewReader(tempFile, info.Size())
+		if err != nil {
+			return fmt.Errorf("failed to create zip reader: %w", err)
+		}
+	}
 
 	// Write CREATE TABLE
 	tableName := "file_list"

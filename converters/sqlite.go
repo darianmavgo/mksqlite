@@ -159,15 +159,22 @@ WHERE id = ?`,
 // GenCreateTableSQL generates a CREATE TABLE SQL statement
 func GenCreateTableSQL(tableName string, columnNames []string) string {
 	colTypes := GenColumnTypes(columnNames)
-	sql := "CREATE TABLE " + tableName + " ("
+	var builder strings.Builder
+	builder.Grow(len(tableName) + len(columnNames)*20) // Heuristic pre-allocation
+
+	builder.WriteString("CREATE TABLE ")
+	builder.WriteString(tableName)
+	builder.WriteString(" (")
 	for i, name := range columnNames {
-		sql += name + " " + colTypes[i]
+		builder.WriteString(name)
+		builder.WriteByte(' ')
+		builder.WriteString(colTypes[i])
 		if i < len(columnNames)-1 {
-			sql += ", "
+			builder.WriteString(", ")
 		}
 	}
-	sql += ")"
-	return sql
+	builder.WriteByte(')')
+	return builder.String()
 }
 
 // ImportToSQLite imports data from a RowProvider and writes the resulting SQLite database

@@ -11,82 +11,7 @@ const (
 	CSVTB = "tb0"
 )
 
-// CalcColumnCount calculates the maximum number of columns based on sampled lines.
-// It attempts to detect the delimiter if not provided by checking consistency across lines.
-// This where I should eventually document detected/assumed options as some kind of config object.
-func ColumnCount(rawlines []string, delimiter string) int {
-	if len(rawlines) == 0 {
-		return 0
-	}
-
-	// Detect delimiter if not provided
-	if delimiter == "" {
-		commonDelimiters := []string{",", "\t", ";", "|"}
-		bestDelim := ""
-		bestScore := -1.0
-
-		for _, candidate := range commonDelimiters {
-			counts := make([]int, len(rawlines))
-			nonZero := 0
-			total := 0
-
-			for i, line := range rawlines {
-				c := strings.Count(line, candidate)
-				counts[i] = c
-				total += c
-				if c > 0 {
-					nonZero++
-				}
-			}
-
-			// If delimiter never appears, skip it
-			if nonZero == 0 {
-				continue
-			}
-
-			// Calculate consistency
-			isConsistent := true
-			first := counts[0]
-			for _, c := range counts {
-				if c != first {
-					isConsistent = false
-					break
-				}
-			}
-
-			avg := float64(total) / float64(len(rawlines))
-			currentScore := avg
-
-			// Boost consistent delimiters significantly
-			// We prioritize consistency over raw count to avoid false positives from text fields
-			if isConsistent {
-				currentScore += 1000.0
-			}
-
-			if currentScore > bestScore {
-				bestScore = currentScore
-				bestDelim = candidate
-			}
-		}
-		delimiter = bestDelim
-	}
-
-	// If no delimiter found or lines empty of delimiters, return 1 column
-	if delimiter == "" {
-		return 1
-	}
-
-	// Calculate max columns using the chosen delimiter
-	maxCols := 0
-	for _, line := range rawlines {
-		// Column count is separator count + 1
-		cols := strings.Count(line, delimiter) + 1
-		if cols > maxCols {
-			maxCols = cols
-		}
-	}
-	return maxCols
-}
+var emptyPadding = make([]string, 1024)
 
 // CSVConverter converts CSV files to SQLite tables
 type CSVConverter struct {
@@ -102,6 +27,7 @@ var _ RowProvider = (*CSVConverter)(nil)
 // Note: scanRows can only be called once in this mode.
 func NewCSVConverter(r io.Reader) (*CSVConverter, error) {
 	reader := csv.NewReader(r)
+	reader.FieldsPerRecord = -1 // Allow variable number of fields
 	headers, err := reader.Read()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CSV headers: %w", err)
@@ -136,6 +62,21 @@ func (c *CSVConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
+// padRow pads or truncates the row to match the target length.
+func padRow(row []string, targetLen int) []string {
+	if len(row) < targetLen {
+		needed := targetLen - len(row)
+		if needed <= len(emptyPadding) {
+			row = append(row, emptyPadding[:needed]...)
+		} else {
+			row = append(row, make([]string, needed)...)
+		}
+	} else if len(row) > targetLen {
+		row = row[:targetLen]
+	}
+	return row
+}
+
 // ScanRows implements RowProvider using a worker pattern (pipelining) to improve streaming performance.
 func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
 	if tableName != CSVTB {
@@ -166,15 +107,7 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) erro
 			}
 
 			// Ensure row has the same number of columns as headers
-			if len(row) < len(c.headers) {
-				// Pad with empty strings
-				for len(row) < len(c.headers) {
-					row = append(row, "")
-				}
-			} else if len(row) > len(c.headers) {
-				// Truncate to match header count
-				row = row[:len(c.headers)]
-			}
+			row = padRow(row, len(c.headers))
 
 			// Convert to interface{}
 			interfaceRow := make([]interface{}, len(row))
@@ -206,6 +139,7 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) erro
 // It uses concurrency to pipeline reading and writing.
 func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 	csvReader := csv.NewReader(reader)
+	csvReader.FieldsPerRecord = -1 // Allow variable number of fields
 	headers, err := csvReader.Read()
 	if err != nil {
 		return fmt.Errorf("failed to read CSV headers: %w", err)
@@ -245,13 +179,7 @@ func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 			}
 
 			// Ensure row has the same number of columns as sanitized headers
-			if len(row) < len(sanitizedHeaders) {
-				for len(row) < len(sanitizedHeaders) {
-					row = append(row, "")
-				}
-			} else if len(row) > len(sanitizedHeaders) {
-				row = row[:len(sanitizedHeaders)]
-			}
+			row = padRow(row, len(sanitizedHeaders))
 
 			rowsCh <- row
 		}
@@ -311,6 +239,7 @@ func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 // This is a helper function primarily used for testing or small files.
 func parseCSV(reader io.Reader) ([]string, [][]string, error) {
 	csvReader := csv.NewReader(reader)
+	csvReader.FieldsPerRecord = -1 // Allow variable number of fields
 	headers, err := csvReader.Read()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to read CSV headers: %w", err)
@@ -339,15 +268,7 @@ func parseCSV(reader io.Reader) ([]string, [][]string, error) {
 		}
 
 		// Ensure row has the same number of columns as filtered headers
-		if len(row) < len(sanitizedHeaders) {
-			// Pad with empty strings
-			for len(row) < len(sanitizedHeaders) {
-				row = append(row, "")
-			}
-		} else if len(row) > len(sanitizedHeaders) {
-			// Truncate to match header count
-			row = row[:len(sanitizedHeaders)]
-		}
+		row = padRow(row, len(sanitizedHeaders))
 
 		rows = append(rows, row)
 	}
