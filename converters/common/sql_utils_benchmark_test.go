@@ -1,4 +1,4 @@
-package converters
+package common
 
 import (
 	"fmt"

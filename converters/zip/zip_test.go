@@ -1,8 +1,9 @@
-package converters
+package zip
 
 import (
 	"archive/zip"
 	"database/sql"
+	"mksqlite/converters"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,8 +61,8 @@ func createTestZip(t *testing.T, path string) {
 }
 
 func TestZipConvertFile(t *testing.T) {
-	inputPath := "../sample_data/test_archive.zip"
-	outputPath := "../sample_out/zip_convert.db"
+	inputPath := "../../sample_data/test_archive.zip"
+	outputPath := "../../sample_out/zip_convert.db"
 
 	// Clean up potential old files
 	os.Remove(inputPath)
@@ -92,7 +93,7 @@ func TestZipConvertFile(t *testing.T) {
 	}
 	defer outFile.Close()
 
-	err = ImportToSQLite(converter, outFile)
+	err = converters.ImportToSQLite(converter, outFile)
 	if err != nil {
 		t.Fatalf("ImportToSQLite failed: %v", err)
 	}

@@ -1,7 +1,8 @@
-package converters
+package json
 
 import (
 	"database/sql"
+	"mksqlite/converters"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,7 +38,7 @@ func TestJSONArray(t *testing.T) {
 		t.Errorf("Headers mismatch: %v", headers)
 	}
 
-	outPath := "../sample_out/json_test/json_array.db"
+	outPath := "../../sample_out/json_test/json_array.db"
 	os.MkdirAll(filepath.Dir(outPath), 0755)
 	os.Remove(outPath)
 
@@ -45,7 +46,7 @@ func TestJSONArray(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = ImportToSQLite(conv, f)
+	err = converters.ImportToSQLite(conv, f)
 	f.Close()
 
 	if err != nil {
@@ -115,13 +116,13 @@ func TestJSONObject(t *testing.T) {
 		t.Errorf("Posts headers mismatch: %v", pHeaders)
 	}
 
-	outPath := "../sample_out/json_test/json_object.db"
+	outPath := "../../sample_out/json_test/json_object.db"
 	os.MkdirAll(filepath.Dir(outPath), 0755)
 	os.Remove(outPath)
 
 	f, err := os.Create(outPath)
 	if err != nil { t.Fatal(err) }
-	err = ImportToSQLite(conv, f)
+	err = converters.ImportToSQLite(conv, f)
 	f.Close()
 	if err != nil {
 		t.Fatalf("Import failed: %v", err)
@@ -150,12 +151,12 @@ func TestJSONNested(t *testing.T) {
 	reader := strings.NewReader(jsonContent)
 	conv, _ := NewJSONConverter(reader)
 
-	outPath := "../sample_out/json_test/json_nested.db"
+	outPath := "../../sample_out/json_test/json_nested.db"
 	os.MkdirAll(filepath.Dir(outPath), 0755)
 	os.Remove(outPath)
 
 	f, _ := os.Create(outPath)
-	ImportToSQLite(conv, f)
+	converters.ImportToSQLite(conv, f)
 	f.Close()
 
 	db, _ := sql.Open("sqlite3", outPath)

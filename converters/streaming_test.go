@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"mksqlite/converters/csv"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,7 +59,7 @@ func TestStreamingInterruption(t *testing.T) {
 	// 3. Create Converter
 	// Note: NewCSVConverter reads the header immediately.
 	// Make sure failAtBytes is large enough (it is).
-	converter, err := NewCSVConverter(reader)
+	converter, err := csv.NewCSVConverter(reader)
 	if err != nil {
 		t.Fatalf("Failed to create converter: %v", err)
 	}

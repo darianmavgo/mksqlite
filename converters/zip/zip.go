@@ -1,9 +1,10 @@
-package converters
+package zip
 
 import (
 	"archive/zip"
 	"fmt"
 	"io"
+	"mksqlite/converters/common"
 	"os"
 	"strings"
 	"time"
@@ -16,7 +17,7 @@ type ZipConverter struct {
 }
 
 // Ensure ZipConverter implements RowProvider
-var _ RowProvider = (*ZipConverter)(nil)
+var _ common.RowProvider = (*ZipConverter)(nil)
 
 // Close closes and removes the temporary file if it exists.
 func (z *ZipConverter) Close() error {
@@ -90,7 +91,7 @@ func (z *ZipConverter) GetHeaders(tableName string) []string {
 			"crc32",
 			"is_dir",
 		}
-		return GenColumnNames(rawHeaders)
+		return common.GenColumnNames(rawHeaders)
 	}
 	return nil
 }
@@ -165,7 +166,7 @@ func (z *ZipConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 	// Write CREATE TABLE
 	tableName := "file_list"
 	headers := z.GetHeaders(tableName)
-	createTableSQL := GenCreateTableSQL(tableName, headers)
+	createTableSQL := common.GenCreateTableSQL(tableName, headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
