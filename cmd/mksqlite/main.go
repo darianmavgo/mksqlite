@@ -50,6 +50,11 @@ func FileToSQLite(inputPath, outputPath string) error {
 		return fmt.Errorf("failed to initialize converter: %w", convErr)
 	}
 
+	// Clean up converter resources if it implements io.Closer
+	if c, ok := converter.(io.Closer); ok {
+		defer c.Close()
+	}
+
 	// Ensure output directory exists
 	dir := filepath.Dir(outputPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
