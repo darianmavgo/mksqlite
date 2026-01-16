@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,7 +35,13 @@ func TestCSVConvertFromURL(t *testing.T) {
 		t.Logf("Failed to remove existing output: %v", err)
 	}
 
-	err = ImportToSQLiteFile(converter, outputPath)
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatalf("Failed to create output file: %v", err)
+	}
+	defer outFile.Close()
+
+	err = ImportToSQLite(converter, outFile)
 	if err != nil {
 		t.Logf("ImportToSQLite finished with error (possibly network interruption): %v", err)
 	} else {

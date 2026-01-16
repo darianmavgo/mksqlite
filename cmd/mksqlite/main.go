@@ -39,6 +39,8 @@ func FileToSQLite(inputPath, outputPath string) error {
 			converter, convErr = converters.NewZipConverter(inputFile)
 		case ".html", ".htm":
 			converter, convErr = converters.NewHTMLConverter(inputFile)
+		case ".json":
+			converter, convErr = converters.NewJSONConverter(inputFile)
 		default:
 			return fmt.Errorf("unsupported file type: %s", ext)
 		}
@@ -154,6 +156,8 @@ func exportToSQL(inputPath string, writer io.Writer) error {
 		converter = &converters.ZipConverter{}
 	case ".html", ".htm":
 		converter = &converters.HTMLConverter{}
+	case ".json":
+		converter = &converters.JSONConverter{}
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
