@@ -4,18 +4,22 @@ import (
 	"bytes"
 	"database/sql"
 	"io"
+	"mksqlite/converters/common"
 	"os"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// MockProvider implements RowProvider for testing
+// MockProvider implements common.RowProvider for testing
 type MockProvider struct {
 	tableNames []string
 	headers    map[string][]string
 	rows       map[string][][]interface{}
 }
+
+// Ensure MockProvider implements common.RowProvider
+var _ common.RowProvider = (*MockProvider)(nil)
 
 func (m *MockProvider) GetTableNames() []string {
 	return m.tableNames

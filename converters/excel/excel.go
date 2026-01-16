@@ -1,8 +1,9 @@
-package converters
+package excel
 
 import (
 	"fmt"
 	"io"
+	"mksqlite/converters/common"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -17,7 +18,7 @@ type ExcelConverter struct {
 }
 
 // Ensure ExcelConverter implements RowProvider
-var _ RowProvider = (*ExcelConverter)(nil)
+var _ common.RowProvider = (*ExcelConverter)(nil)
 
 // NewExcelConverter creates a new ExcelConverter from an io.Reader
 func NewExcelConverter(r io.Reader) (*ExcelConverter, error) {
@@ -34,7 +35,7 @@ func NewExcelConverter(r io.Reader) (*ExcelConverter, error) {
 		return nil, fmt.Errorf("no sheets found in Excel file")
 	}
 
-	tableNames := GenTableNames(sheets)
+	tableNames := common.GenTableNames(sheets)
 	headersMap := make(map[string][]string)
 	sheetMap := make(map[string]string)
 
@@ -56,7 +57,7 @@ func NewExcelConverter(r io.Reader) (*ExcelConverter, error) {
 				f.Close()
 				return nil, fmt.Errorf("failed to read header row for sheet %s: %w", sheetName, err)
 			}
-			headersMap[tableName] = GenColumnNames(headerRow)
+			headersMap[tableName] = common.GenColumnNames(headerRow)
 		}
 		rows.Close()
 	}
@@ -146,7 +147,7 @@ func (e *ExcelConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error 
 		return fmt.Errorf("no sheets found in Excel stream")
 	}
 
-	tableNames := GenTableNames(sheets)
+	tableNames := common.GenTableNames(sheets)
 
 	for idx, sheetName := range sheets {
 		tableName := tableNames[idx]
@@ -163,14 +164,14 @@ func (e *ExcelConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error 
 				rows.Close()
 				return fmt.Errorf("failed to read header row for sheet %s: %w", sheetName, err)
 			}
-			headers = GenColumnNames(headerRow)
+			headers = common.GenColumnNames(headerRow)
 		} else {
 			rows.Close()
 			continue // Skip empty sheet
 		}
 
 		// Write CREATE TABLE statement
-		createTableSQL := GenCreateTableSQL(tableName, headers)
+		createTableSQL := common.GenCreateTableSQL(tableName, headers)
 		if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 			rows.Close()
 			return fmt.Errorf("failed to write CREATE TABLE: %w", err)

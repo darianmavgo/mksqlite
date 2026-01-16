@@ -1,9 +1,10 @@
-package converters
+package filesystem
 
 import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mksqlite/converters/common"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,7 @@ type FilesystemConverter struct {
 }
 
 // Ensure FilesystemConverter implements RowProvider
-var _ RowProvider = (*FilesystemConverter)(nil)
+var _ common.RowProvider = (*FilesystemConverter)(nil)
 
 // NewFilesystemConverter creates a new FilesystemConverter from an io.Reader.
 // It requires the reader to be an *os.File to determine the directory path.
@@ -124,7 +125,7 @@ func (c *FilesystemConverter) ConvertToSQL(reader io.Reader, writer io.Writer) e
 	headers := []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
 
 	// Write CREATE TABLE statement
-	createTableSQL := GenCreateTableSQL(FSTB, headers)
+	createTableSQL := common.GenCreateTableSQL(FSTB, headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}

@@ -1,7 +1,8 @@
-package converters
+package filesystem
 
 import (
 	"database/sql"
+	"mksqlite/converters"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ import (
 
 func TestFilesystemConvertFile(t *testing.T) {
 	// Create a persistent directory for testing
-	tempDir := "../sample_out/filesystem_test"
+	tempDir := "../../sample_out/filesystem_test"
 	if err := os.RemoveAll(tempDir); err != nil {
 		t.Fatalf("failed to clean temp dir: %v", err)
 	}
@@ -60,7 +61,7 @@ func TestFilesystemConvertFile(t *testing.T) {
 	}
 	defer outFile.Close()
 
-	err = ImportToSQLite(converter, outFile)
+	err = converters.ImportToSQLite(converter, outFile)
 	if err != nil {
 		t.Fatalf("ImportToSQLite failed: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestFilesystemConvertFile(t *testing.T) {
 
 func TestFilesystemConvertToSQL(t *testing.T) {
 	// Create a persistent directory for testing
-	tempDir := "../sample_out/filesystem_test_sql"
+	tempDir := "../../sample_out/filesystem_test_sql"
 	if err := os.RemoveAll(tempDir); err != nil {
 		t.Fatalf("failed to clean temp dir: %v", err)
 	}

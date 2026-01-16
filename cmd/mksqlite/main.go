@@ -4,6 +4,13 @@ import (
 	"fmt"
 	"io"
 	"mksqlite/converters"
+	"mksqlite/converters/common"
+	"mksqlite/converters/csv"
+	"mksqlite/converters/excel"
+	"mksqlite/converters/filesystem"
+	"mksqlite/converters/html"
+	"mksqlite/converters/json"
+	"mksqlite/converters/zip"
 	"os"
 	"path/filepath"
 )
@@ -23,24 +30,24 @@ func FileToSQLite(inputPath, outputPath string) error {
 	}
 	defer inputFile.Close()
 
-	var converter converters.RowProvider
+	var converter common.RowProvider
 	var convErr error
 
 	if info.IsDir() {
-		converter, convErr = converters.NewFilesystemConverter(inputFile)
+		converter, convErr = filesystem.NewFilesystemConverter(inputFile)
 	} else {
 		ext := filepath.Ext(inputPath)
 		switch ext {
 		case ".csv":
-			converter, convErr = converters.NewCSVConverter(inputFile)
+			converter, convErr = csv.NewCSVConverter(inputFile)
 		case ".xlsx", ".xls":
-			converter, convErr = converters.NewExcelConverter(inputFile)
+			converter, convErr = excel.NewExcelConverter(inputFile)
 		case ".zip":
-			converter, convErr = converters.NewZipConverter(inputFile)
+			converter, convErr = zip.NewZipConverter(inputFile)
 		case ".html", ".htm":
-			converter, convErr = converters.NewHTMLConverter(inputFile)
+			converter, convErr = html.NewHTMLConverter(inputFile)
 		case ".json":
-			converter, convErr = converters.NewJSONConverter(inputFile)
+			converter, convErr = json.NewJSONConverter(inputFile)
 		default:
 			return fmt.Errorf("unsupported file type: %s", ext)
 		}
@@ -145,24 +152,24 @@ func exportToSQL(inputPath string, writer io.Writer) error {
 	defer file.Close()
 
 	if info.IsDir() {
-		converter := &converters.FilesystemConverter{}
+		converter := &filesystem.FilesystemConverter{}
 		return converter.ConvertToSQL(file, writer)
 	}
 
 	ext := filepath.Ext(inputPath)
-	var converter converters.StreamConverter
+	var converter common.StreamConverter
 
 	switch ext {
 	case ".csv":
-		converter = &converters.CSVConverter{}
+		converter = &csv.CSVConverter{}
 	case ".xlsx", ".xls":
-		converter = &converters.ExcelConverter{}
+		converter = &excel.ExcelConverter{}
 	case ".zip":
-		converter = &converters.ZipConverter{}
+		converter = &zip.ZipConverter{}
 	case ".html", ".htm":
-		converter = &converters.HTMLConverter{}
+		converter = &html.HTMLConverter{}
 	case ".json":
-		converter = &converters.JSONConverter{}
+		converter = &json.JSONConverter{}
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}

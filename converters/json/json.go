@@ -1,9 +1,10 @@
-package converters
+package json
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mksqlite/converters/common"
 	"sort"
 	"strings"
 )
@@ -33,7 +34,7 @@ type jsonTableInfo struct {
 }
 
 // Ensure JSONConverter implements RowProvider
-var _ RowProvider = (*JSONConverter)(nil)
+var _ common.RowProvider = (*JSONConverter)(nil)
 
 // NewJSONConverter creates a new JSONConverter from an io.Reader.
 func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
@@ -82,7 +83,7 @@ func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
 			rawHeaders := extractRawHeaders(rowMap)
 			c.tables[c.arrayTable] = &jsonTableInfo{
 				rawHeaders: rawHeaders,
-				headers:    GenColumnNames(rawHeaders),
+				headers:    common.GenColumnNames(rawHeaders),
 			}
 		} else {
 			// Empty array
@@ -132,12 +133,12 @@ func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
 				}
 				c.tables[k] = &jsonTableInfo{
 					rawHeaders: rawHeaders,
-					headers:    GenColumnNames(rawHeaders),
+					headers:    common.GenColumnNames(rawHeaders),
 				}
 			}
 		}
 		sort.Strings(names)
-		c.tableNames = GenTableNames(names)
+		c.tableNames = common.GenTableNames(names)
 
 		// Rebuild c.tables with sanitized names
 		newTables := make(map[string]*jsonTableInfo)
@@ -306,7 +307,7 @@ func (c *JSONConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 
 	for _, tableName := range conv.GetTableNames() {
 		headers := conv.GetHeaders(tableName)
-		createSQL := GenCreateTableSQL(tableName, headers)
+		createSQL := common.GenCreateTableSQL(tableName, headers)
 		if _, err := fmt.Fprintf(writer, "%s;\n\n", createSQL); err != nil {
 			return err
 		}

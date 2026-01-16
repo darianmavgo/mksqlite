@@ -1,9 +1,10 @@
-package converters
+package csv
 
 import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"mksqlite/converters/common"
 	"strings"
 )
 
@@ -20,7 +21,7 @@ type CSVConverter struct {
 }
 
 // Ensure CSVConverter implements RowProvider
-var _ RowProvider = (*CSVConverter)(nil)
+var _ common.RowProvider = (*CSVConverter)(nil)
 
 // NewCSVConverter creates a new CSVConverter from an io.Reader.
 // This allows streaming data from a source (e.g. HTTP response) without a local file.
@@ -41,7 +42,7 @@ func NewCSVConverter(r io.Reader) (*CSVConverter, error) {
 		}
 	}
 
-	sanitizedHeaders := GenColumnNames(filteredHeaders)
+	sanitizedHeaders := common.GenColumnNames(filteredHeaders)
 
 	return &CSVConverter{
 		headers:   sanitizedHeaders,
@@ -153,10 +154,10 @@ func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 		}
 	}
 
-	sanitizedHeaders := GenColumnNames(filteredHeaders)
+	sanitizedHeaders := common.GenColumnNames(filteredHeaders)
 
 	// Write CREATE TABLE statement
-	createTableSQL := GenCreateTableSQL(CSVTB, sanitizedHeaders)
+	createTableSQL := common.GenCreateTableSQL(CSVTB, sanitizedHeaders)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
@@ -254,7 +255,7 @@ func parseCSV(reader io.Reader) ([]string, [][]string, error) {
 	}
 
 	// Sanitize headers for SQL column names
-	sanitizedHeaders := GenColumnNames(filteredHeaders)
+	sanitizedHeaders := common.GenColumnNames(filteredHeaders)
 
 	// Read all rows
 	var rows [][]string

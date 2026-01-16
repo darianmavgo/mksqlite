@@ -1,8 +1,9 @@
-package converters
+package html
 
 import (
 	"fmt"
 	"io"
+	"mksqlite/converters/common"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -21,7 +22,7 @@ type tableData struct {
 }
 
 // Ensure HTMLConverter implements RowProvider
-var _ RowProvider = (*HTMLConverter)(nil)
+var _ common.RowProvider = (*HTMLConverter)(nil)
 
 // NewHTMLConverter creates a new HTMLConverter from an io.Reader
 func NewHTMLConverter(r io.Reader) (*HTMLConverter, error) {
@@ -39,7 +40,7 @@ func NewHTMLConverter(r io.Reader) (*HTMLConverter, error) {
 			rawNames[i] = fmt.Sprintf("table%d", i)
 		}
 	}
-	tableNames := GenTableNames(rawNames)
+	tableNames := common.GenTableNames(rawNames)
 
 	return &HTMLConverter{
 		tables:     tables,
@@ -56,7 +57,7 @@ func (c *HTMLConverter) GetTableNames() []string {
 func (c *HTMLConverter) GetHeaders(tableName string) []string {
 	for i, name := range c.tableNames {
 		if name == tableName {
-			return GenColumnNames(c.tables[i].headers)
+			return common.GenColumnNames(c.tables[i].headers)
 		}
 	}
 	return nil
@@ -102,14 +103,14 @@ func (c *HTMLConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 			rawNames[i] = fmt.Sprintf("table%d", i)
 		}
 	}
-	tableNames := GenTableNames(rawNames)
+	tableNames := common.GenTableNames(rawNames)
 
 	for i, t := range tables {
 		if len(t.headers) == 0 && len(t.rows) == 0 {
 			continue
 		}
 
-		sanitizedHeaders := GenColumnNames(t.headers)
+		sanitizedHeaders := common.GenColumnNames(t.headers)
 		if err := writeHTMLTableSQL(tableNames[i], sanitizedHeaders, t.rows, writer); err != nil {
 			return err
 		}
@@ -119,7 +120,7 @@ func (c *HTMLConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 }
 
 func writeHTMLTableSQL(tableName string, headers []string, rows [][]string, writer io.Writer) error {
-	createTableSQL := GenCreateTableSQL(tableName, headers)
+	createTableSQL := common.GenCreateTableSQL(tableName, headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}

@@ -1,8 +1,9 @@
-package converters
+package csv
 
 import (
 	"database/sql"
 	"fmt"
+	"mksqlite/converters"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,9 +31,14 @@ func TestCSVConvertFromURL(t *testing.T) {
 		t.Fatalf("Failed to create converter from reader: %v", err)
 	}
 
-	outputPath := "../sample_out/url_test.db"
+	outputPath := "../../sample_out/url_test.db"
 	if err := os.Remove(outputPath); err != nil && !os.IsNotExist(err) {
 		t.Logf("Failed to remove existing output: %v", err)
+	}
+
+	// Ensure output directory exists (since we changed path to ../../sample_out)
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
 	}
 
 	outFile, err := os.Create(outputPath)
@@ -41,7 +47,7 @@ func TestCSVConvertFromURL(t *testing.T) {
 	}
 	defer outFile.Close()
 
-	err = ImportToSQLite(converter, outFile)
+	err = converters.ImportToSQLite(converter, outFile)
 	if err != nil {
 		t.Logf("ImportToSQLite finished with error (possibly network interruption): %v", err)
 	} else {
@@ -72,8 +78,8 @@ func TestCSVConvertFromURL(t *testing.T) {
 }
 
 func TestCSVConvertFile(t *testing.T) {
-	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv" // Using real sample data
-	outputPath := "../sample_out/csv_convert.db"
+	inputPath := "../../sample_data/demo_mavgo_flight/Expenses.csv" // Using real sample data
+	outputPath := "../../sample_out/csv_convert.db"
 
 	// Ensure output directory exists
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
@@ -97,7 +103,7 @@ func TestCSVConvertFile(t *testing.T) {
 	}
 	defer outFile.Close()
 
-	err = ImportToSQLite(converter, outFile)
+	err = converters.ImportToSQLite(converter, outFile)
 	if err != nil {
 		t.Fatalf("ImportToSQLite failed: %v", err)
 	}
@@ -124,8 +130,8 @@ func TestCSVConvertFile(t *testing.T) {
 func TestCSVConvertToSQL(t *testing.T) {
 	converter := &CSVConverter{}
 
-	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv"
-	outputPath := "../sample_out/csv_convert.sql"
+	inputPath := "../../sample_data/demo_mavgo_flight/Expenses.csv"
+	outputPath := "../../sample_out/csv_convert.sql"
 
 	// Ensure output directory exists
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
@@ -165,7 +171,7 @@ func TestCSVConvertToSQL(t *testing.T) {
 }
 
 func TestCSVParseCSV(t *testing.T) {
-	inputPath := "../sample_data/demo_mavgo_flight/Expenses.csv"
+	inputPath := "../../sample_data/demo_mavgo_flight/Expenses.csv"
 	file, err := os.Open(inputPath)
 	if err != nil {
 		t.Fatalf("Failed to open input file: %v", err)
