@@ -1,12 +1,28 @@
-package converters
+package json
 
 import (
-	"encoding/json"
+	stdjson "encoding/json"
 	"fmt"
 	"io"
+	"mksqlite/converters"
 	"sort"
 	"strings"
 )
+
+func init() {
+	converters.Register("json", &Driver{})
+}
+
+type Driver struct{}
+
+func (d *Driver) Open(r io.Reader) (converters.RowProvider, error) {
+	return NewJSONConverter(r)
+}
+
+func (d *Driver) ConvertToSQL(r io.Reader, w io.Writer) error {
+	c := &JSONConverter{}
+	return c.ConvertToSQL(r, w)
+}
 
 // JSONConverter converts JSON files to SQLite tables
 type JSONConverter struct {
@@ -15,7 +31,7 @@ type JSONConverter struct {
 	tables     map[string]*jsonTableInfo
 
 	// For streaming array
-	decoder    *json.Decoder
+	decoder    *stdjson.Decoder
 	firstRow   map[string]interface{}
 	arrayTable string // Name of the table if root is array
 
@@ -33,13 +49,13 @@ type jsonTableInfo struct {
 }
 
 // Ensure JSONConverter implements RowProvider
-var _ RowProvider = (*JSONConverter)(nil)
+var _ converters.RowProvider = (*JSONConverter)(nil)
 
 // NewJSONConverter creates a new JSONConverter from an io.Reader.
 func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
 	seeker, isSeeker := r.(io.ReadSeeker)
 
-	dec := json.NewDecoder(r)
+	dec := stdjson.NewDecoder(r)
 
 	// Peek the first token to determine structure
 	token, err := dec.Token()
@@ -47,7 +63,7 @@ func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
 		return nil, fmt.Errorf("failed to read JSON start: %w", err)
 	}
 
-	delim, ok := token.(json.Delim)
+	delim, ok := token.(stdjson.Delim)
 	if !ok {
 		return nil, fmt.Errorf("expected JSON object or array at root")
 	}
@@ -82,7 +98,7 @@ func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
 			rawHeaders := extractRawHeaders(rowMap)
 			c.tables[c.arrayTable] = &jsonTableInfo{
 				rawHeaders: rawHeaders,
-				headers:    GenColumnNames(rawHeaders),
+				headers:    converters.GenColumnNames(rawHeaders),
 			}
 		} else {
 			// Empty array
@@ -132,12 +148,12 @@ func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
 				}
 				c.tables[k] = &jsonTableInfo{
 					rawHeaders: rawHeaders,
-					headers:    GenColumnNames(rawHeaders),
+					headers:    converters.GenColumnNames(rawHeaders),
 				}
 			}
 		}
 		sort.Strings(names)
-		c.tableNames = GenTableNames(names)
+		c.tableNames = converters.GenTableNames(names)
 
 		// Rebuild c.tables with sanitized names
 		newTables := make(map[string]*jsonTableInfo)
@@ -197,18 +213,18 @@ func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}) err
 
 		// Stream the rest
 		for c.decoder.More() {
-			var val json.RawMessage
+			var val stdjson.RawMessage
 			if err := c.decoder.Decode(&val); err != nil {
 				return fmt.Errorf("error decoding array element: %w", err)
 			}
 
-			var rowMap map[string]json.RawMessage
+			var rowMap map[string]stdjson.RawMessage
 			if len(val) > 0 && val[0] == '{' {
-				if err := json.Unmarshal(val, &rowMap); err != nil {
-					rowMap = map[string]json.RawMessage{"value": val}
+				if err := stdjson.Unmarshal(val, &rowMap); err != nil {
+					rowMap = map[string]stdjson.RawMessage{"value": val}
 				}
 			} else {
-				rowMap = map[string]json.RawMessage{"value": val}
+				rowMap = map[string]stdjson.RawMessage{"value": val}
 			}
 
 			row := flattenRowRaw(rowMap, info.rawHeaders)
@@ -251,7 +267,7 @@ func flattenRow(rowMap map[string]interface{}, rawHeaders []string) []interface{
 		// Handle nesting: "Anything more nested than that can be added to a json field in each row."
 		switch v := val.(type) {
 		case map[string]interface{}, []interface{}:
-			b, err := json.Marshal(v)
+			b, err := stdjson.Marshal(v)
 			if err == nil {
 				row[i] = string(b)
 			} else {
@@ -264,7 +280,7 @@ func flattenRow(rowMap map[string]interface{}, rawHeaders []string) []interface{
 	return row
 }
 
-func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []interface{} {
+func flattenRowRaw(rowMap map[string]stdjson.RawMessage, rawHeaders []string) []interface{} {
 	row := make([]interface{}, len(rawHeaders))
 	for i, key := range rawHeaders {
 		val, ok := rowMap[key]
@@ -287,7 +303,7 @@ func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []int
 		} else {
 			// It's primitive, unmarshal it
 			var primitive interface{}
-			if err := json.Unmarshal(val, &primitive); err != nil {
+			if err := stdjson.Unmarshal(val, &primitive); err != nil {
 				row[i] = string(val) // Fallback
 			} else {
 				row[i] = primitive
@@ -306,7 +322,7 @@ func (c *JSONConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 
 	for _, tableName := range conv.GetTableNames() {
 		headers := conv.GetHeaders(tableName)
-		createSQL := GenCreateTableSQL(tableName, headers)
+		createSQL := converters.GenCreateTableSQL(tableName, headers)
 		if _, err := fmt.Fprintf(writer, "%s;\n\n", createSQL); err != nil {
 			return err
 		}

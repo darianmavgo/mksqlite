@@ -1,9 +1,10 @@
-package converters
+package filesystem
 
 import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mksqlite/converters"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,13 +15,28 @@ const (
 	FSTB = "tb0"
 )
 
+func init() {
+	converters.Register("filesystem", &Driver{})
+}
+
+type Driver struct{}
+
+func (d *Driver) Open(r io.Reader) (converters.RowProvider, error) {
+	return NewFilesystemConverter(r)
+}
+
+func (d *Driver) ConvertToSQL(r io.Reader, w io.Writer) error {
+	c := &FilesystemConverter{}
+	return c.ConvertToSQL(r, w)
+}
+
 // FilesystemConverter converts directory listings to SQLite tables
 type FilesystemConverter struct {
 	inputPath string
 }
 
 // Ensure FilesystemConverter implements RowProvider
-var _ RowProvider = (*FilesystemConverter)(nil)
+var _ converters.RowProvider = (*FilesystemConverter)(nil)
 
 // NewFilesystemConverter creates a new FilesystemConverter from an io.Reader.
 // It requires the reader to be an *os.File to determine the directory path.
@@ -124,7 +140,7 @@ func (c *FilesystemConverter) ConvertToSQL(reader io.Reader, writer io.Writer) e
 	headers := []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
 
 	// Write CREATE TABLE statement
-	createTableSQL := GenCreateTableSQL(FSTB, headers)
+	createTableSQL := converters.GenCreateTableSQL(FSTB, headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}

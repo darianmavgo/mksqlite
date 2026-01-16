@@ -1,22 +1,38 @@
-package converters
+package zip
 
 import (
-	"archive/zip"
+	stdzip "archive/zip"
 	"fmt"
 	"io"
+	"mksqlite/converters"
 	"os"
 	"strings"
 	"time"
 )
 
+func init() {
+	converters.Register("zip", &Driver{})
+}
+
+type Driver struct{}
+
+func (d *Driver) Open(r io.Reader) (converters.RowProvider, error) {
+	return NewZipConverter(r)
+}
+
+func (d *Driver) ConvertToSQL(r io.Reader, w io.Writer) error {
+	c := &ZipConverter{}
+	return c.ConvertToSQL(r, w)
+}
+
 // ZipConverter converts ZIP archive file lists to SQLite tables
 type ZipConverter struct {
-	zipReader *zip.Reader
+	zipReader *stdzip.Reader
 	tempFile  *os.File // To be cleaned up if a temp file was used
 }
 
 // Ensure ZipConverter implements RowProvider
-var _ RowProvider = (*ZipConverter)(nil)
+var _ converters.RowProvider = (*ZipConverter)(nil)
 
 // Close closes and removes the temporary file if it exists.
 func (z *ZipConverter) Close() error {
@@ -29,7 +45,7 @@ func (z *ZipConverter) Close() error {
 
 // NewZipConverter creates a new ZipConverter from an io.Reader
 func NewZipConverter(r io.Reader) (*ZipConverter, error) {
-	var zipReader *zip.Reader
+	var zipReader *stdzip.Reader
 	var err error
 	var tempFile *os.File
 
@@ -38,7 +54,7 @@ func NewZipConverter(r io.Reader) (*ZipConverter, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to stat file: %w", err)
 		}
-		zipReader, err = zip.NewReader(f, info.Size())
+		zipReader, err = stdzip.NewReader(f, info.Size())
 	} else {
 		// Create temp file instead of reading fully into memory
 		tempFile, err = os.CreateTemp("", "mksqlite-zip-*.zip")
@@ -63,7 +79,7 @@ func NewZipConverter(r io.Reader) (*ZipConverter, error) {
 			return nil, fmt.Errorf("failed to stat temp file: %w", err)
 		}
 
-		zipReader, err = zip.NewReader(tempFile, info.Size())
+		zipReader, err = stdzip.NewReader(tempFile, info.Size())
 		if err != nil {
 			cleanup()
 			return nil, fmt.Errorf("failed to create zip reader: %w", err)
@@ -90,7 +106,7 @@ func (z *ZipConverter) GetHeaders(tableName string) []string {
 			"crc32",
 			"is_dir",
 		}
-		return GenColumnNames(rawHeaders)
+		return converters.GenColumnNames(rawHeaders)
 	}
 	return nil
 }
@@ -128,14 +144,14 @@ func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}) erro
 
 // ConvertToSQL implements StreamConverter for ZIP files
 func (z *ZipConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
-	var zipReader *zip.Reader
+	var zipReader *stdzip.Reader
 
 	if f, ok := reader.(*os.File); ok {
 		info, err := f.Stat()
 		if err != nil {
 			return fmt.Errorf("failed to stat file: %w", err)
 		}
-		zipReader, err = zip.NewReader(f, info.Size())
+		zipReader, err = stdzip.NewReader(f, info.Size())
 	} else {
 		// Create temp file instead of reading fully into memory
 		tempFile, err := os.CreateTemp("", "mksqlite-zip-stream-*.zip")
@@ -156,7 +172,7 @@ func (z *ZipConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 			return fmt.Errorf("failed to stat temp file: %w", err)
 		}
 
-		zipReader, err = zip.NewReader(tempFile, info.Size())
+		zipReader, err = stdzip.NewReader(tempFile, info.Size())
 		if err != nil {
 			return fmt.Errorf("failed to create zip reader: %w", err)
 		}
@@ -165,7 +181,7 @@ func (z *ZipConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 	// Write CREATE TABLE
 	tableName := "file_list"
 	headers := z.GetHeaders(tableName)
-	createTableSQL := GenCreateTableSQL(tableName, headers)
+	createTableSQL := converters.GenCreateTableSQL(tableName, headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}

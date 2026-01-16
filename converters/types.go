@@ -24,6 +24,15 @@ type RowProvider interface {
 	ScanRows(tableName string, yield func([]interface{}) error) error
 }
 
+// Driver defines the interface that must be implemented by a converter package.
+type Driver interface {
+	// Open returns a new RowProvider for the given input.
+	Open(io.Reader) (RowProvider, error)
+
+	// ConvertToSQL converts the input stream to SQL statements written to writer.
+	ConvertToSQL(io.Reader, io.Writer) error
+}
+
 // sqliteKeywords is a slice containing all possible SQLite SQL keywords.
 // This list is based on the complete set recognized by SQLite (as of recent versions),
 // sourced from the official documentation: https://sqlite.org/lang_keywords.html

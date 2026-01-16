@@ -1,9 +1,11 @@
-package converters
+package converters_test
 
 import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"mksqlite/converters"
+	"mksqlite/converters/csv"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,7 +60,7 @@ func TestStreamingInterruption(t *testing.T) {
 	// 3. Create Converter
 	// Note: NewCSVConverter reads the header immediately.
 	// Make sure failAtBytes is large enough (it is).
-	converter, err := NewCSVConverter(reader)
+	converter, err := csv.NewCSVConverter(reader)
 	if err != nil {
 		t.Fatalf("Failed to create converter: %v", err)
 	}
@@ -80,11 +82,11 @@ func TestStreamingInterruption(t *testing.T) {
 	defer outFile.Close()
 
 	// Set batch size to 100 for testing
-	originalBatchSize := BatchSize
-	BatchSize = 100
-	defer func() { BatchSize = originalBatchSize }()
+	originalBatchSize := converters.BatchSize
+	converters.BatchSize = 100
+	defer func() { converters.BatchSize = originalBatchSize }()
 
-	err = ImportToSQLite(converter, outFile)
+	err = converters.ImportToSQLite(converter, outFile)
 	if err == nil {
 		t.Log("ImportToSQLite succeeded unexpectedly (stream interruption didn't occur or was handled?)")
 	} else {

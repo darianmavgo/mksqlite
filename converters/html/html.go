@@ -1,12 +1,28 @@
-package converters
+package html
 
 import (
 	"fmt"
 	"io"
+	"mksqlite/converters"
 	"strings"
 
-	"golang.org/x/net/html"
+	nethtml "golang.org/x/net/html"
 )
+
+func init() {
+	converters.Register("html", &Driver{})
+}
+
+type Driver struct{}
+
+func (d *Driver) Open(r io.Reader) (converters.RowProvider, error) {
+	return NewHTMLConverter(r)
+}
+
+func (d *Driver) ConvertToSQL(r io.Reader, w io.Writer) error {
+	c := &HTMLConverter{}
+	return c.ConvertToSQL(r, w)
+}
 
 // HTMLConverter converts HTML files to SQLite tables
 type HTMLConverter struct {
@@ -21,7 +37,7 @@ type tableData struct {
 }
 
 // Ensure HTMLConverter implements RowProvider
-var _ RowProvider = (*HTMLConverter)(nil)
+var _ converters.RowProvider = (*HTMLConverter)(nil)
 
 // NewHTMLConverter creates a new HTMLConverter from an io.Reader
 func NewHTMLConverter(r io.Reader) (*HTMLConverter, error) {
@@ -39,7 +55,7 @@ func NewHTMLConverter(r io.Reader) (*HTMLConverter, error) {
 			rawNames[i] = fmt.Sprintf("table%d", i)
 		}
 	}
-	tableNames := GenTableNames(rawNames)
+	tableNames := converters.GenTableNames(rawNames)
 
 	return &HTMLConverter{
 		tables:     tables,
@@ -56,7 +72,7 @@ func (c *HTMLConverter) GetTableNames() []string {
 func (c *HTMLConverter) GetHeaders(tableName string) []string {
 	for i, name := range c.tableNames {
 		if name == tableName {
-			return GenColumnNames(c.tables[i].headers)
+			return converters.GenColumnNames(c.tables[i].headers)
 		}
 	}
 	return nil
@@ -102,14 +118,14 @@ func (c *HTMLConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 			rawNames[i] = fmt.Sprintf("table%d", i)
 		}
 	}
-	tableNames := GenTableNames(rawNames)
+	tableNames := converters.GenTableNames(rawNames)
 
 	for i, t := range tables {
 		if len(t.headers) == 0 && len(t.rows) == 0 {
 			continue
 		}
 
-		sanitizedHeaders := GenColumnNames(t.headers)
+		sanitizedHeaders := converters.GenColumnNames(t.headers)
 		if err := writeHTMLTableSQL(tableNames[i], sanitizedHeaders, t.rows, writer); err != nil {
 			return err
 		}
@@ -119,7 +135,7 @@ func (c *HTMLConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 }
 
 func writeHTMLTableSQL(tableName string, headers []string, rows [][]string, writer io.Writer) error {
-	createTableSQL := GenCreateTableSQL(tableName, headers)
+	createTableSQL := converters.GenCreateTableSQL(tableName, headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
@@ -177,15 +193,15 @@ func writeHTMLTableSQL(tableName string, headers []string, rows [][]string, writ
 }
 
 func parseHTML(reader io.Reader) ([]tableData, error) {
-	doc, err := html.Parse(reader)
+	doc, err := nethtml.Parse(reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
 	var tables []tableData
-	var f func(*html.Node)
-	f = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "table" {
+	var f func(*nethtml.Node)
+	f = func(n *nethtml.Node) {
+		if n.Type == nethtml.ElementNode && n.Data == "table" {
 			t := extractTable(n)
 			tables = append(tables, t)
 		}
@@ -197,7 +213,7 @@ func parseHTML(reader io.Reader) ([]tableData, error) {
 	return tables, nil
 }
 
-func extractTable(n *html.Node) tableData {
+func extractTable(n *nethtml.Node) tableData {
 	var name string
 	for _, attr := range n.Attr {
 		if attr.Key == "id" {
@@ -207,12 +223,12 @@ func extractTable(n *html.Node) tableData {
 	}
 
 	var rows [][]string
-	var visitRows func(*html.Node)
-	visitRows = func(node *html.Node) {
-		if node.Type == html.ElementNode && node.Data == "tr" {
+	var visitRows func(*nethtml.Node)
+	visitRows = func(node *nethtml.Node) {
+		if node.Type == nethtml.ElementNode && node.Data == "tr" {
 			var row []string
 			for c := node.FirstChild; c != nil; c = c.NextSibling {
-				if c.Type == html.ElementNode && (c.Data == "td" || c.Data == "th") {
+				if c.Type == nethtml.ElementNode && (c.Data == "td" || c.Data == "th") {
 					row = append(row, extractText(c))
 				}
 			}
@@ -222,7 +238,7 @@ func extractTable(n *html.Node) tableData {
 
 		for c := node.FirstChild; c != nil; c = c.NextSibling {
 			// Don't traverse into nested tables here
-			if c.Type == html.ElementNode && c.Data == "table" {
+			if c.Type == nethtml.ElementNode && c.Data == "table" {
 				continue
 			}
 			visitRows(c)
@@ -241,14 +257,14 @@ func extractTable(n *html.Node) tableData {
 	}
 }
 
-func extractText(n *html.Node) string {
+func extractText(n *nethtml.Node) string {
 	var sb strings.Builder
 	extractTextRecursive(n, &sb)
 	return strings.TrimSpace(sb.String())
 }
 
-func extractTextRecursive(n *html.Node, sb *strings.Builder) {
-	if n.Type == html.TextNode {
+func extractTextRecursive(n *nethtml.Node, sb *strings.Builder) {
+	if n.Type == nethtml.TextNode {
 		sb.WriteString(n.Data)
 		return
 	}

@@ -6,7 +6,36 @@ import (
 	"mksqlite/converters"
 	"os"
 	"path/filepath"
+
+	_ "mksqlite/converters/csv"
+	_ "mksqlite/converters/excel"
+	_ "mksqlite/converters/filesystem"
+	_ "mksqlite/converters/html"
+	_ "mksqlite/converters/json"
+	_ "mksqlite/converters/zip"
 )
+
+// determineDriver identifies the appropriate driver based on file info and path
+func determineDriver(path string, info os.FileInfo) (string, error) {
+	if info.IsDir() {
+		return "filesystem", nil
+	}
+	ext := filepath.Ext(path)
+	switch ext {
+	case ".csv":
+		return "csv", nil
+	case ".xlsx", ".xls":
+		return "excel", nil
+	case ".zip":
+		return "zip", nil
+	case ".html", ".htm":
+		return "html", nil
+	case ".json":
+		return "json", nil
+	default:
+		return "", fmt.Errorf("unsupported file type: %s", ext)
+	}
+}
 
 // FileToSQLite converts a file to SQLite using the appropriate converter
 func FileToSQLite(inputPath, outputPath string) error {
@@ -16,38 +45,20 @@ func FileToSQLite(inputPath, outputPath string) error {
 		return fmt.Errorf("failed to stat input path: %w", err)
 	}
 
-	var inputFile *os.File
-	inputFile, err = os.Open(inputPath)
+	inputFile, err := os.Open(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to open input: %w", err)
 	}
 	defer inputFile.Close()
 
-	var converter converters.RowProvider
-	var convErr error
-
-	if info.IsDir() {
-		converter, convErr = converters.NewFilesystemConverter(inputFile)
-	} else {
-		ext := filepath.Ext(inputPath)
-		switch ext {
-		case ".csv":
-			converter, convErr = converters.NewCSVConverter(inputFile)
-		case ".xlsx", ".xls":
-			converter, convErr = converters.NewExcelConverter(inputFile)
-		case ".zip":
-			converter, convErr = converters.NewZipConverter(inputFile)
-		case ".html", ".htm":
-			converter, convErr = converters.NewHTMLConverter(inputFile)
-		case ".json":
-			converter, convErr = converters.NewJSONConverter(inputFile)
-		default:
-			return fmt.Errorf("unsupported file type: %s", ext)
-		}
+	driverName, err := determineDriver(inputPath, info)
+	if err != nil {
+		return err
 	}
 
-	if convErr != nil {
-		return fmt.Errorf("failed to initialize converter: %w", convErr)
+	converter, err := converters.Open(driverName, inputFile)
+	if err != nil {
+		return fmt.Errorf("failed to initialize converter for %s: %w", driverName, err)
 	}
 
 	// Clean up converter resources if it implements io.Closer
@@ -85,12 +96,6 @@ func main() {
 			os.Exit(1)
 		}
 		inputPath := os.Args[2]
-
-		// If output file is provided (arg 3 is output), use it, else stdout?
-		// Usage says [output_file].
-		// If 3 args: mksqlite --sql input output
-		// If 2 args (excluding --sql): wait, os.Args[0] is prog.
-		// os.Args[1] is --sql. os.Args[2] is input. os.Args[3] is output (optional).
 
 		var writer io.Writer
 		if len(os.Args) >= 4 {
@@ -144,28 +149,10 @@ func exportToSQL(inputPath string, writer io.Writer) error {
 	}
 	defer file.Close()
 
-	if info.IsDir() {
-		converter := &converters.FilesystemConverter{}
-		return converter.ConvertToSQL(file, writer)
+	driverName, err := determineDriver(inputPath, info)
+	if err != nil {
+		return err
 	}
 
-	ext := filepath.Ext(inputPath)
-	var converter converters.StreamConverter
-
-	switch ext {
-	case ".csv":
-		converter = &converters.CSVConverter{}
-	case ".xlsx", ".xls":
-		converter = &converters.ExcelConverter{}
-	case ".zip":
-		converter = &converters.ZipConverter{}
-	case ".html", ".htm":
-		converter = &converters.HTMLConverter{}
-	case ".json":
-		converter = &converters.JSONConverter{}
-	default:
-		return fmt.Errorf("unsupported file type: %s", ext)
-	}
-
-	return converter.ConvertToSQL(file, writer)
+	return converters.StreamSQL(driverName, file, writer)
 }

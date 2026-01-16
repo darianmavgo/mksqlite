@@ -1,15 +1,31 @@
-package converters
+package csv
 
 import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"mksqlite/converters"
 	"strings"
 )
 
 const (
 	CSVTB = "tb0"
 )
+
+func init() {
+	converters.Register("csv", &Driver{})
+}
+
+type Driver struct{}
+
+func (d *Driver) Open(r io.Reader) (converters.RowProvider, error) {
+	return NewCSVConverter(r)
+}
+
+func (d *Driver) ConvertToSQL(r io.Reader, w io.Writer) error {
+	c := &CSVConverter{}
+	return c.ConvertToSQL(r, w)
+}
 
 var emptyPadding = make([]string, 1024)
 
@@ -20,7 +36,7 @@ type CSVConverter struct {
 }
 
 // Ensure CSVConverter implements RowProvider
-var _ RowProvider = (*CSVConverter)(nil)
+var _ converters.RowProvider = (*CSVConverter)(nil)
 
 // NewCSVConverter creates a new CSVConverter from an io.Reader.
 // This allows streaming data from a source (e.g. HTTP response) without a local file.
@@ -41,7 +57,7 @@ func NewCSVConverter(r io.Reader) (*CSVConverter, error) {
 		}
 	}
 
-	sanitizedHeaders := GenColumnNames(filteredHeaders)
+	sanitizedHeaders := converters.GenColumnNames(filteredHeaders)
 
 	return &CSVConverter{
 		headers:   sanitizedHeaders,
@@ -153,10 +169,10 @@ func (c *CSVConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 		}
 	}
 
-	sanitizedHeaders := GenColumnNames(filteredHeaders)
+	sanitizedHeaders := converters.GenColumnNames(filteredHeaders)
 
 	// Write CREATE TABLE statement
-	createTableSQL := GenCreateTableSQL(CSVTB, sanitizedHeaders)
+	createTableSQL := converters.GenCreateTableSQL(CSVTB, sanitizedHeaders)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
@@ -254,7 +270,7 @@ func parseCSV(reader io.Reader) ([]string, [][]string, error) {
 	}
 
 	// Sanitize headers for SQL column names
-	sanitizedHeaders := GenColumnNames(filteredHeaders)
+	sanitizedHeaders := converters.GenColumnNames(filteredHeaders)
 
 	// Read all rows
 	var rows [][]string

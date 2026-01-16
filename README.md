@@ -62,40 +62,52 @@ Generates `CREATE TABLE` and `INSERT` statements to standard output. Useful for 
 | Input Type | Extensions | Output Table Structure | SQL Export Support |
 |------------|------------|------------------------|--------------------|
 | **CSV** | `.csv` | Table columns match CSV headers. Column names are sanitized for SQL. | ✅ Yes |
-| **Excel** | `.xlsx`, `.xls` | Each sheet becomes a table. First row is used as headers. | ❌ No (Planned) |
+| **Excel** | `.xlsx`, `.xls` | Each sheet becomes a table. First row is used as headers. | ✅ Yes |
 | **HTML** | `.html`, `.htm` | Extracts `<table id="...">` elements. If no ID, tables are named `table0`, `table1`, etc. | ✅ Yes |
-| **Zip** | `.zip` | Creates a `file_list` table containing metadata of files inside the archive (name, size, CRC, etc.). | ❌ No (Planned) |
+| **Zip** | `.zip` | Creates a `file_list` table containing metadata of files inside the archive (name, size, CRC, etc.). | ✅ Yes |
 | **Filesystem** | (Directory) | Creates a `data` table listing all files recursively with columns: `path`, `name`, `size`, `extension`, `mod_time`, `is_dir`. | ✅ Yes |
 
 ## Library Usage
 
 `mksqlite` can be used as a Go library to integrate conversion logic into your own applications.
+Converters are registered via imports, similar to `database/sql` drivers.
 
 ### Interfaces
 
-The core logic is built around flexible interfaces defined in `converters/types.go`:
+The core logic is built around flexible interfaces defined in `converters/types.go` and `converters/registry.go`:
 
-- **`FileConverter`**: Converts a source file directly to a destination SQLite DB file.
-- **`StreamConverter`**: Converts an `io.Reader` to SQL statements written to an `io.Writer`.
-- **`RowProvider`**: (Internal) standardized interface for fetching rows/headers from any source.
+- **`RowProvider`**: Standardized interface for fetching rows/headers from any source.
+- **`Driver`**: Interface for opening a converter or streaming SQL.
 
 ### Example: Converting a File to SQLite
 
 ```go
-import "mksqlite/converters"
+import (
+    "os"
+    "mksqlite/converters"
+    _ "mksqlite/converters/csv" // Register CSV driver
+)
 
 func main() {
-    // CSV
-    csvConv := &converters.CSVConverter{}
-    err := csvConv.ConvertFile("input.csv", "output.db")
+    // Open input
+    file, _ := os.Open("input.csv")
+    defer file.Close()
 
-    // HTML
-    htmlConv := &converters.HTMLConverter{}
-    err = htmlConv.ConvertFile("report.html", "output.db")
+    // Open output
+    outFile, _ := os.Create("output.db")
+    defer outFile.Close()
 
-    // Directory (Filesystem)
-    fsConv := &converters.FilesystemConverter{}
-    err = fsConv.ConvertFile("./data_dir", "index.db")
+    // Get converter from registry
+    provider, err := converters.Open("csv", file)
+    if err != nil {
+        panic(err)
+    }
+
+    // Import
+    err = converters.ImportToSQLite(provider, outFile)
+    if err != nil {
+        panic(err)
+    }
 }
 ```
 
@@ -105,16 +117,18 @@ func main() {
 import (
     "os"
     "mksqlite/converters"
+    _ "mksqlite/converters/csv"
 )
 
 func main() {
-    // Open input file
     file, _ := os.Open("data.csv")
     defer file.Close()
 
-    // Export SQL
-    converter := &converters.CSVConverter{}
-    err := converter.ConvertToSQL(file, os.Stdout)
+    // Stream SQL
+    err := converters.StreamSQL("csv", file, os.Stdout)
+    if err != nil {
+        panic(err)
+    }
 }
 ```
 
