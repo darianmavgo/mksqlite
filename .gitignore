@@ -53,6 +53,5 @@ go.work.sum
 .env.local
 
 # === Test Output ===
-sample_out/filesystem_test/
-sample_out/filesystem_test_sql/
-sample_out/streaming_test/
+sample_out/
+
