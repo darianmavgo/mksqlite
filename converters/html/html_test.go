@@ -13,7 +13,11 @@ import (
 
 func TestHTMLConvertFile(t *testing.T) {
 	inputPath := "../../sample_data/demo_mavgo_flight/Expenses.html" // Using real sample data
-	outputPath := "../../sample_out/html_convert.db"
+	outputDir := "../../test_output"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "html_convert.db")
 
 	// Ensure output directory exists
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
@@ -95,7 +99,11 @@ func TestHTMLConvertFile(t *testing.T) {
 
 func TestHTMLConvertToSQL(t *testing.T) {
 	inputPath := "../../sample_data/demo_mavgo_flight/Expenses.html"
-	outputPath := "../../sample_out/html_convert.sql"
+	outputDir := "../../test_output"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "html_convert.sql")
 
 	// Ensure output directory exists
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {

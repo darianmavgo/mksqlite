@@ -13,7 +13,7 @@ import (
 
 func TestFilesystemConvertFile(t *testing.T) {
 	// Create a persistent directory for testing
-	tempDir := "../../sample_out/filesystem_test"
+	tempDir := "../../test_output/filesystem_test"
 	if err := os.RemoveAll(tempDir); err != nil {
 		t.Fatalf("failed to clean temp dir: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestFilesystemConvertFile(t *testing.T) {
 
 	// Create some files
 	files := []struct {
-		path string
+		path    string
 		content string
 	}{
 		{"file1.txt", "content1"},
@@ -99,7 +99,7 @@ func TestFilesystemConvertFile(t *testing.T) {
 
 func TestFilesystemConvertToSQL(t *testing.T) {
 	// Create a persistent directory for testing
-	tempDir := "../../sample_out/filesystem_test_sql"
+	tempDir := "../../test_output/filesystem_test_sql"
 	if err := os.RemoveAll(tempDir); err != nil {
 		t.Fatalf("failed to clean temp dir: %v", err)
 	}

@@ -38,7 +38,11 @@ func TestJSONArray(t *testing.T) {
 		t.Errorf("Headers mismatch: %v", headers)
 	}
 
-	outPath := "../../sample_out/json_test/json_array.db"
+	outputDir := "../../test_output/json_test"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	outPath := filepath.Join(outputDir, "json_array.db")
 	os.MkdirAll(filepath.Dir(outPath), 0755)
 	os.Remove(outPath)
 
@@ -116,12 +120,18 @@ func TestJSONObject(t *testing.T) {
 		t.Errorf("Posts headers mismatch: %v", pHeaders)
 	}
 
-	outPath := "../../sample_out/json_test/json_object.db"
+	outputDir := "../../test_output/json_test"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	outPath := filepath.Join(outputDir, "json_object.db")
 	os.MkdirAll(filepath.Dir(outPath), 0755)
 	os.Remove(outPath)
 
 	f, err := os.Create(outPath)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	err = converters.ImportToSQLite(conv, f)
 	f.Close()
 	if err != nil {
@@ -129,7 +139,9 @@ func TestJSONObject(t *testing.T) {
 	}
 
 	db, err := sql.Open("sqlite3", outPath)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 
 	var count int
@@ -151,7 +163,11 @@ func TestJSONNested(t *testing.T) {
 	reader := strings.NewReader(jsonContent)
 	conv, _ := NewJSONConverter(reader)
 
-	outPath := "../../sample_out/json_test/json_nested.db"
+	outputDir := "../../test_output/json_test"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	outPath := filepath.Join(outputDir, "json_nested.db")
 	os.MkdirAll(filepath.Dir(outPath), 0755)
 	os.Remove(outPath)
 
@@ -183,11 +199,12 @@ func TestJSONConvertToSQL(t *testing.T) {
 	jsonContent := `[{"col": "val'ue"}]`
 	reader := strings.NewReader(jsonContent)
 
-	var buf strings.Builder
 	conv, err := NewJSONConverter(reader)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	var buf strings.Builder
 	err = conv.ConvertToSQL(&buf)
 	if err != nil {
 		t.Fatal(err)

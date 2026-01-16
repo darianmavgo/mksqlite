@@ -61,7 +61,11 @@ func TestHTMLStreamingFromR2(t *testing.T) {
 		return
 	}
 
-	dbPath := filepath.Join(t.TempDir(), "r2_html_test.db")
+	outputDir := "../../test_output"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	dbPath := filepath.Join(outputDir, "r2_html_test.db")
 	dbFile, err := os.Create(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create db file: %v", err)

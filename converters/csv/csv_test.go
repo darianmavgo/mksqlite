@@ -31,7 +31,11 @@ func TestCSVConvertFromURL(t *testing.T) {
 		t.Fatalf("Failed to create converter from reader: %v", err)
 	}
 
-	outputPath := "../../sample_out/url_test.db"
+	outputDir := "../../test_output"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "url_test.db")
 	if err := os.Remove(outputPath); err != nil && !os.IsNotExist(err) {
 		t.Logf("Failed to remove existing output: %v", err)
 	}
@@ -78,8 +82,12 @@ func TestCSVConvertFromURL(t *testing.T) {
 }
 
 func TestCSVConvertFile(t *testing.T) {
-	inputPath := "../../sample_data/demo_mavgo_flight/Expenses.csv" // Using real sample data
-	outputPath := "../../sample_out/csv_convert.db"
+	inputPath := "../../sample_data/21mb.csv" // Using real large sample data
+	outputDir := "../../test_output"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "csv_convert.db")
 
 	// Ensure output directory exists
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
@@ -128,8 +136,12 @@ func TestCSVConvertFile(t *testing.T) {
 }
 
 func TestCSVConvertToSQL(t *testing.T) {
-	inputPath := "../../sample_data/demo_mavgo_flight/Expenses.csv"
-	outputPath := "../../sample_out/csv_convert.sql"
+	inputPath := "../../sample_data/21mb.csv"
+	outputDir := "../../test_output"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "csv_convert.sql")
 
 	// Ensure output directory exists
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {

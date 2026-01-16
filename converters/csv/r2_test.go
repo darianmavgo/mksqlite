@@ -33,7 +33,7 @@ func (r *R2FaultyReader) Close() error {
 }
 
 func TestCSVStreamingFromR2(t *testing.T) {
-	url := "https://pub-a1c6b68deb9d48e1b5783f84723c93ec.r2.dev/sample_data/sample.csv"
+	url := "https://pub-a1c6b68deb9d48e1b5783f84723c93ec.r2.dev/sample_data/21mb.csv"
 	resp, err := http.Get(url)
 	if err != nil {
 		t.Fatalf("Failed to fetch from R2: %v", err)
@@ -61,7 +61,11 @@ func TestCSVStreamingFromR2(t *testing.T) {
 		return
 	}
 
-	dbPath := filepath.Join(t.TempDir(), "r2_test.db")
+	outputDir := "../../test_output"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	dbPath := filepath.Join(outputDir, "r2_test.db")
 	dbFile, err := os.Create(dbPath)
 	if err != nil {
 		t.Fatalf("Failed to create db file: %v", err)

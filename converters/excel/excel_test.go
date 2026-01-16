@@ -12,8 +12,12 @@ import (
 )
 
 func TestExcelConvertFile(t *testing.T) {
-	inputPath := "../../sample_data/sample.xlsx"
-	outputPath := "../../sample_out/excel_convert.db"
+	inputPath := "../../sample_data/20mb.xlsx"
+	outputDir := "../../test_output"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "excel_convert.db")
 
 	// Check if file exists, if not, skip
 	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
@@ -88,8 +92,12 @@ func TestExcelConvertFile(t *testing.T) {
 }
 
 func TestExcelConvertToSQL(t *testing.T) {
-	inputPath := "../../sample_data/sample.xlsx"
-	outputPath := "../../sample_out/excel_convert.sql"
+	inputPath := "../../sample_data/20mb.xlsx"
+	outputDir := "../../test_output"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	outputPath := filepath.Join(outputDir, "excel_convert.sql")
 
 	// Check if file exists
 	if _, err := os.Stat(inputPath); os.IsNotExist(err) {

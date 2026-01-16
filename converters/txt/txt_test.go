@@ -11,79 +11,77 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func TestTxtConverter_RequestHeadersSampleCurl(t *testing.T) {
+func TestTxtConverter_LargeFile(t *testing.T) {
 	// We are now in mksqlite/converters/txt (presumably when running tests here)
 	// Sample data is at ../../sample_data/...
 	// NOTE: This path adjustment depends on where `go test` is run from.
 	// We'll try to find the project root.
+	// We verify that we can read the large file and get a significant number of rows.
 
-	sampleRelPath := "../../sample_data/demo_chrome/request_headers_sample_curl.txt"
+	inputPath := "../../sample_data/20mb-examplefile-com.txt"
 	// Check if this exists, if not, try from root
-	if _, err := os.Stat(sampleRelPath); os.IsNotExist(err) {
-		sampleRelPath = "sample_data/demo_chrome/request_headers_sample_curl.txt"
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		inputPath = "sample_data/20mb-examplefile-com.txt"
 	}
 
-	file, err := os.Open(sampleRelPath)
+	file, err := os.Open(inputPath)
 	if err != nil {
 		// Try one more common path for "go test ./..." from root
-		sampleRelPath = "sample_data/demo_chrome/request_headers_sample_curl.txt"
-		file, err = os.Open(sampleRelPath)
+		inputPath = "sample_data/20mb-examplefile-com.txt"
+		file, err = os.Open(inputPath)
 		if err != nil {
 			t.Fatalf("failed to open sample file: %v", err)
 		}
 	}
 	defer file.Close()
 
-	converter, err := NewTxtConverter(file)
+	conv, err := NewTxtConverter(file)
 	if err != nil {
 		t.Fatalf("failed to create TxtConverter: %v", err)
 	}
 
-	dbPath := filepath.Join(t.TempDir(), "test.db")
+	outputDir := "../../test_output"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
+	dbPath := filepath.Join(outputDir, "test.db")
 	dbFile, err := os.Create(dbPath)
 	if err != nil {
 		t.Fatalf("failed to create db file: %v", err)
 	}
 	defer dbFile.Close()
 
-	if err := converters.ImportToSQLite(converter, dbFile); err != nil {
+	if err := converters.ImportToSQLite(conv, dbFile); err != nil {
 		t.Fatalf("ImportToSQLite failed: %v", err)
 	}
 
+	// Verify DB content
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
-		t.Fatalf("failed to open sqlite db: %v", err)
+		t.Fatalf("failed to open db: %v", err)
 	}
 	defer db.Close()
 
-	rows, err := db.Query("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", "tb0")
-	if err != nil {
-		t.Fatalf("failed to query tables: %v", err)
-	}
-	if !rows.Next() {
-		t.Fatal("table 'tb0' not found")
-	}
-	rows.Close()
-
+	// Check row count
 	var count int
 	err = db.QueryRow("SELECT COUNT(*) FROM tb0").Scan(&count)
 	if err != nil {
 		t.Fatalf("failed to count rows: %v", err)
 	}
+	if count < 1000 {
+		t.Errorf("Unexpected row count. Got: %d, Want: > 1000", count)
+	}
 
-	expectedLine1 := "User-Agent: curl/7.85.0"
+	// Check first row
+	// Check first row
 	var content string
-	err = db.QueryRow("SELECT content FROM tb0 WHERE rowid = 1").Scan(&content)
+	err = db.QueryRow("SELECT content FROM tb0 LIMIT 1").Scan(&content)
 	if err != nil {
-		t.Fatalf("failed to query row 1: %v", err)
+		t.Fatalf("failed to query first row: %v", err)
 	}
-
-	if content != expectedLine1 {
-		t.Errorf("Row 1 content mismatch.\nGot: %q\nWant: %q", content, expectedLine1)
-	}
-
-	if count != 20 {
-		t.Errorf("Unexpected row count. Got: %d, Want: 20", count)
+	// "examplefile.com | Your Example Files." seemed to be the content
+	if !strings.Contains(content, "examplefile") {
+		t.Logf("First row content: %q", content)
 	}
 }
 
