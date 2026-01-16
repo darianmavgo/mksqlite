@@ -1,0 +1,38 @@
+Sec-Ch-Ua: "Not?A_Brand";v="8", "Chromium";v="108", "Google Chrome";v="108"
+X-Cloud-Trace-Context: f49e43cadc25811c402e91a1b208a0c3/7019741361770235283;o=1
+X-Appengine-Citylatlong: 40.586540,-122.391675
+X-Google-Apps-Metadata: domain=gmail.com,host=f.mavgo.com
+X-Appengine-Default-Namespace: gmail.com
+Dnt: 1
+Accept-Language: en-US,en;q=0.9
+X-Appengine-City: redding
+X-Appengine-Timeout-Ms: 599999
+Sec-Ch-Ua-Arch: "arm"
+Sec-Ch-Ua-Model: ""
+X-Appengine-Https: on
+Accept-Encoding: gzip, deflate, br
+Sec-Ch-Ua-Mobile: ?0
+Sec-Ch-Ua-Platform-Version: "13.1.0"
+Sec-Ch-Ua-Full-Version-List: "Not?A_Brand";v="8.0.0.0", "Chromium";v="108.0.5359.124", "Google Chrome";v="108.0.5359.124"
+Sec-Fetch-Site: none
+X-Appengine-Region: ca
+X-Google-Serverless-Node-Envoy-Config-Gae: 
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
+Sec-Fetch-Mode: navigate
+X-Appengine-User-Ip: 174.87.122.24
+Sec-Ch-Ua-Platform: "macOS"
+Sec-Ch-Ua-Wow64: ?0
+Sec-Fetch-Dest: document
+Cookie: _ga=GA1.2.570052228.1670395813; _gid=GA1.2.185778967.1671560167
+X-Appengine-Api-Ticket: ChBiMGNjZWE3OGYzODRkODJkEIS8rRcQk7ytFxCx7tUXEMLu1RcQyK/oFxDZr+gXEOGx6BcQ8rHoFxC27ukXEMfu6RcQz6ztFxDgrO0XEJjW7RcQqdbtFxCwn/UXEMGf9RcQu6H1FxDMofUXEPK39xcQg7j3FxoTCIyToavii/wCFasJRAgd7yIJQg==
+X-Forwarded-Proto: https
+Forwarded: for="174.87.122.24";proto=https
+X-Appengine-Default-Version-Hostname: wc2022-356423.uc.r.appspot.com
+Upgrade-Insecure-Requests: 1
+Sec-Ch-Ua-Bitness: "64"
+Sec-Fetch-User: ?1
+X-Appengine-Country: US
+Traceparent: 00-f49e43cadc25811c402e91a1b208a0c3-616b21938b6e8593-01
+X-Forwarded-For: 174.87.122.24
+X-Appengine-Request-Log-Id: 63a389cc00ff0b3e8c6e8bdcbf0001737e7763323032322d3335363432330001323032323132323174313430393430000100
