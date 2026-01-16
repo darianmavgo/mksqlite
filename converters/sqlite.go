@@ -51,6 +51,13 @@ func GenCompliantNames(rawnames []string, prefix string) []string {
 		item = reg.ReplaceAllString(item, "")
 		item = space.ReplaceAllString(item, "_")
 		item = strings.ToLower(item)
+		// remove keywords
+		for _, keyword := range KEYWORDS_LOWER {
+			if item == keyword {
+				item = fmt.Sprintf("%s%d", prefix, idx)
+				break
+			}
+		}
 
 		// If stripping non-compliant chars leaves us with nothing, give it a default index name
 		if len(item) == 0 {
@@ -95,7 +102,6 @@ func GenColumnTypes(columnnames []string) []string {
 	}
 	return coltypes
 }
-
 
 // GenPreparedStmt generates a prepared statement for the specified operation
 func GenPreparedStmt(table string, fields []string, stmtType SQLStmtType) (string, error) {
