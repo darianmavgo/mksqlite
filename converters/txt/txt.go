@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"mksqlite/converters"
 	"mksqlite/converters/common"
 	"strings"
 )
@@ -12,6 +13,16 @@ const (
 	TXTTB = "tb0"
 )
 
+func init() {
+	converters.Register("txt", &txtDriver{})
+}
+
+type txtDriver struct{}
+
+func (d *txtDriver) Open(source io.Reader) (common.RowProvider, error) {
+	return NewTxtConverter(source)
+}
+
 // TxtConverter converts text files to SQLite tables (single column 'content')
 type TxtConverter struct {
 	scanner *bufio.Scanner
@@ -19,6 +30,9 @@ type TxtConverter struct {
 
 // Ensure TxtConverter implements RowProvider
 var _ common.RowProvider = (*TxtConverter)(nil)
+
+// Ensure TxtConverter implements StreamConverter
+var _ common.StreamConverter = (*TxtConverter)(nil)
 
 // NewTxtConverter creates a new TxtConverter from an io.Reader.
 func NewTxtConverter(r io.Reader) (*TxtConverter, error) {
@@ -87,8 +101,10 @@ func (c *TxtConverter) ScanRows(tableName string, yield func([]interface{}) erro
 }
 
 // ConvertToSQL implements StreamConverter for Txt files (outputs SQL to writer).
-func (c *TxtConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
-	scanner := bufio.NewScanner(reader)
+func (c *TxtConverter) ConvertToSQL(writer io.Writer) error {
+	if c.scanner == nil {
+		return fmt.Errorf("Txt scanner is not initialized")
+	}
 
 	// Write CREATE TABLE statement
 	createTableSQL := common.GenCreateTableSQL(TXTTB, []string{"content"})
@@ -96,8 +112,8 @@ func (c *TxtConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for c.scanner.Scan() {
+		line := c.scanner.Text()
 
 		if _, err := fmt.Fprintf(writer, "INSERT INTO %s (content) VALUES (", TXTTB); err != nil {
 			return fmt.Errorf("failed to write INSERT start: %w", err)
@@ -114,7 +130,7 @@ func (c *TxtConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := c.scanner.Err(); err != nil {
 		return fmt.Errorf("failed to read txt line: %w", err)
 	}
 

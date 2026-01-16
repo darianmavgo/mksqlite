@@ -99,7 +99,7 @@ Line 3`
 	}
 
 	var builder strings.Builder
-	if err := converter.ConvertToSQL(reader, &builder); err != nil {
+	if err := converter.ConvertToSQL(&builder); err != nil {
 		t.Fatalf("ConvertToSQL failed: %v", err)
 	}
 

@@ -16,6 +16,8 @@ Icon?
 *.dylib
 *.test
 *.out
+main
+mksqlite
 
 # Common binary output names
 bin/
