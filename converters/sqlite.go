@@ -96,26 +96,81 @@ func GenColumnTypes(columnnames []string) []string {
 	return coltypes
 }
 
-// CalcColumnCount calculates the maximum number of columns based on one raw line.
-// We can make this smarter later by sampling more lines.
+// CalcColumnCount calculates the maximum number of columns based on sampled lines.
+// It attempts to detect the delimiter if not provided by checking consistency across lines.
 // This where I should eventually document detected/assumed options as some kind of config object.
-func ColumnCount(rawline string, delimiter string) int {
-	// make this smarter later.
+func ColumnCount(rawlines []string, delimiter string) int {
+	if len(rawlines) == 0 {
+		return 0
+	}
+
+	// Detect delimiter if not provided
 	if delimiter == "" {
 		commonDelimiters := []string{",", "\t", ";", "|"}
-		winner := 0
-		// count each common delimiter and pick the one with the most splits.
-		for idx, candidate := range commonDelimiters {
-			ct := strings.Count(rawline, candidate)
-			if ct > winner {
-				winner = ct
-				delimiter = commonDelimiters[idx]
+		bestDelim := ""
+		bestScore := -1.0
+
+		for _, candidate := range commonDelimiters {
+			counts := make([]int, len(rawlines))
+			nonZero := 0
+			total := 0
+
+			for i, line := range rawlines {
+				c := strings.Count(line, candidate)
+				counts[i] = c
+				total += c
+				if c > 0 {
+					nonZero++
+				}
 			}
 
+			// If delimiter never appears, skip it
+			if nonZero == 0 {
+				continue
+			}
+
+			// Calculate consistency
+			isConsistent := true
+			first := counts[0]
+			for _, c := range counts {
+				if c != first {
+					isConsistent = false
+					break
+				}
+			}
+
+			avg := float64(total) / float64(len(rawlines))
+			currentScore := avg
+
+			// Boost consistent delimiters significantly
+			// We prioritize consistency over raw count to avoid false positives from text fields
+			if isConsistent {
+				currentScore += 1000.0
+			}
+
+			if currentScore > bestScore {
+				bestScore = currentScore
+				bestDelim = candidate
+			}
+		}
+		delimiter = bestDelim
+	}
+
+	// If no delimiter found or lines empty of delimiters, return 1 column
+	if delimiter == "" {
+		return 1
+	}
+
+	// Calculate max columns using the chosen delimiter
+	maxCols := 0
+	for _, line := range rawlines {
+		// Column count is separator count + 1
+		cols := strings.Count(line, delimiter) + 1
+		if cols > maxCols {
+			maxCols = cols
 		}
 	}
-	return strings.Count(rawline, delimiter)
-
+	return maxCols
 }
 
 // GenPreparedStmt generates a prepared statement for the specified operation
