@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mksqlite/converters"
 	"mksqlite/converters/common"
 	"os"
 	"path/filepath"
@@ -15,6 +16,16 @@ const (
 	FSTB = "tb0"
 )
 
+func init() {
+	converters.Register("filesystem", &filesystemDriver{})
+}
+
+type filesystemDriver struct{}
+
+func (d *filesystemDriver) Open(source io.Reader) (common.RowProvider, error) {
+	return NewFilesystemConverter(source)
+}
+
 // FilesystemConverter converts directory listings to SQLite tables
 type FilesystemConverter struct {
 	inputPath string
@@ -22,6 +33,9 @@ type FilesystemConverter struct {
 
 // Ensure FilesystemConverter implements RowProvider
 var _ common.RowProvider = (*FilesystemConverter)(nil)
+
+// Ensure FilesystemConverter implements StreamConverter
+var _ common.StreamConverter = (*FilesystemConverter)(nil)
 
 // NewFilesystemConverter creates a new FilesystemConverter from an io.Reader.
 // It requires the reader to be an *os.File to determine the directory path.
@@ -105,23 +119,15 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 }
 
 // ConvertToSQL implements StreamConverter for filesystem directories
-func (c *FilesystemConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
+func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
 	// We need the path to walk the directory.
-	// Try to get it from the reader if it's an *os.File.
-	file, ok := reader.(*os.File)
-	if !ok {
-		return fmt.Errorf("FilesystemConverter.ConvertToSQL requires an *os.File reader to determine the directory path")
+	// It is stored in c.inputPath
+
+	if c.inputPath == "" {
+		return fmt.Errorf("FilesystemConverter not initialized (inputPath is empty)")
 	}
 
-	inputPath := file.Name()
-	info, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat file: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("input path is not a directory: %s", inputPath)
-	}
-
+	inputPath := c.inputPath
 	headers := []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
 
 	// Write CREATE TABLE statement
@@ -131,7 +137,7 @@ func (c *FilesystemConverter) ConvertToSQL(reader io.Reader, writer io.Writer) e
 	}
 
 	// Walk directory
-	err = filepath.WalkDir(inputPath, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(inputPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

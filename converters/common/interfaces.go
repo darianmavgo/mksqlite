@@ -11,7 +11,7 @@ type Request struct {
 
 // StreamConverter defines the interface for converting data streams to SQL output
 type StreamConverter interface {
-	ConvertToSQL(reader io.Reader, writer io.Writer) error
+	ConvertToSQL(writer io.Writer) error
 }
 
 // RowProvider defines the interface for providing data to be inserted into SQLite
@@ -22,4 +22,11 @@ type RowProvider interface {
 	// It calls the yield function for each row.
 	// If yield returns an error, iteration stops and that error is returned.
 	ScanRows(tableName string, yield func([]interface{}) error) error
+}
+
+// Driver defines the interface that must be implemented by each converter driver.
+type Driver interface {
+	// Open returns a new RowProvider instance that reads from the given source.
+	// The returned RowProvider should also implement StreamConverter if SQL export is supported.
+	Open(source io.Reader) (RowProvider, error)
 }

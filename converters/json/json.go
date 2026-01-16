@@ -4,10 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mksqlite/converters"
 	"mksqlite/converters/common"
 	"sort"
 	"strings"
 )
+
+func init() {
+	converters.Register("json", &jsonDriver{})
+}
+
+type jsonDriver struct{}
+
+func (d *jsonDriver) Open(source io.Reader) (common.RowProvider, error) {
+	return NewJSONConverter(source)
+}
 
 // JSONConverter converts JSON files to SQLite tables
 type JSONConverter struct {
@@ -35,6 +46,9 @@ type jsonTableInfo struct {
 
 // Ensure JSONConverter implements RowProvider
 var _ common.RowProvider = (*JSONConverter)(nil)
+
+// Ensure JSONConverter implements StreamConverter
+var _ common.StreamConverter = (*JSONConverter)(nil)
 
 // NewJSONConverter creates a new JSONConverter from an io.Reader.
 func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
@@ -299,20 +313,15 @@ func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []int
 }
 
 // ConvertToSQL implements StreamConverter
-func (c *JSONConverter) ConvertToSQL(reader io.Reader, writer io.Writer) error {
-	conv, err := NewJSONConverter(reader)
-	if err != nil {
-		return err
-	}
-
-	for _, tableName := range conv.GetTableNames() {
-		headers := conv.GetHeaders(tableName)
+func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
+	for _, tableName := range c.GetTableNames() {
+		headers := c.GetHeaders(tableName)
 		createSQL := common.GenCreateTableSQL(tableName, headers)
 		if _, err := fmt.Fprintf(writer, "%s;\n\n", createSQL); err != nil {
 			return err
 		}
 
-		err := conv.ScanRows(tableName, func(row []interface{}) error {
+		err := c.ScanRows(tableName, func(row []interface{}) error {
 			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", tableName); err != nil {
 				return err
 			}

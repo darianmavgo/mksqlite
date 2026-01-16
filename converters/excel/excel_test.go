@@ -107,7 +107,10 @@ func TestExcelConvertToSQL(t *testing.T) {
 	}
 	defer file.Close()
 
-	converter := &ExcelConverter{}
+	converter, err := NewExcelConverter(file)
+	if err != nil {
+		t.Fatalf("Failed to create converter: %v", err)
+	}
 
 	outFile, err := os.Create(outputPath)
 	if err != nil {
@@ -115,7 +118,7 @@ func TestExcelConvertToSQL(t *testing.T) {
 	}
 	defer outFile.Close()
 
-	err = converter.ConvertToSQL(file, outFile)
+	err = converter.ConvertToSQL(outFile)
 	if err != nil {
 		t.Fatalf("ConvertToSQL failed: %v", err)
 	}

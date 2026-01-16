@@ -133,20 +133,7 @@ func TestFilesystemConvertToSQL(t *testing.T) {
 	}
 	defer outputFile.Close()
 
-	// Note: ConvertToSQL also requires *os.File from reader.
-	// But we initialized converter with dirFile, which is *os.File.
-	// ConvertToSQL also takes reader, but it seems FilesystemConverter.ConvertToSQL ignores the reader argument?
-	// Let's check FilesystemConverter.ConvertToSQL.
-	// It does: `file, ok := reader.(*os.File)`.
-	// So we need to pass dirFile again (or reopen it) to ConvertToSQL.
-	// Since dirFile is already open, passing it again is fine (random access not strictly needed for the path check, but WalkDir uses path).
-	// But `ConvertToSQL` calls `file.Stat()` and `file.Name()`.
-
-	// Rewind? Not needed for Name(), Stat().
-	// But `ConvertToSQL` doesn't consume the file content, it uses the path.
-	// So passing dirFile is fine.
-
-	err = converter.ConvertToSQL(dirFile, outputFile)
+	err = converter.ConvertToSQL(outputFile)
 	if err != nil {
 		t.Fatalf("ConvertToSQL failed: %v", err)
 	}
