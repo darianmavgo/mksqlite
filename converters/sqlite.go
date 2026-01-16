@@ -96,27 +96,6 @@ func GenColumnTypes(columnnames []string) []string {
 	return coltypes
 }
 
-// CalcColumnCount calculates the maximum number of columns based on one raw line.
-// We can make this smarter later by sampling more lines.
-// This where I should eventually document detected/assumed options as some kind of config object.
-func ColumnCount(rawline string, delimiter string) int {
-	// make this smarter later.
-	if delimiter == "" {
-		commonDelimiters := []string{",", "\t", ";", "|"}
-		winner := 0
-		// count each common delimiter and pick the one with the most splits.
-		for idx, candidate := range commonDelimiters {
-			ct := strings.Count(rawline, candidate)
-			if ct > winner {
-				winner = ct
-				delimiter = commonDelimiters[idx]
-			}
-
-		}
-	}
-	return strings.Count(rawline, delimiter)
-
-}
 
 // GenPreparedStmt generates a prepared statement for the specified operation
 func GenPreparedStmt(table string, fields []string, stmtType SQLStmtType) (string, error) {
