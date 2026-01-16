@@ -5,12 +5,22 @@ import (
 	"io"
 	"mksqlite/converters"
 	"mksqlite/converters/common"
+<<<<<<< HEAD
 	_ "mksqlite/converters/csv"
 	_ "mksqlite/converters/excel"
 	_ "mksqlite/converters/filesystem"
 	_ "mksqlite/converters/html"
 	_ "mksqlite/converters/json"
 	_ "mksqlite/converters/zip"
+=======
+	"mksqlite/converters/csv"
+	"mksqlite/converters/excel"
+	"mksqlite/converters/filesystem"
+	"mksqlite/converters/html"
+	"mksqlite/converters/json"
+	"mksqlite/converters/txt"
+	"mksqlite/converters/zip"
+>>>>>>> 93dfbc8 (Added support for alpha sortable text files.)
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,9 +64,39 @@ func FileToSQLite(inputPath, outputPath string) error {
 	}
 	defer inputFile.Close()
 
+<<<<<<< HEAD
 	converter, err := converters.Open(driverName, inputFile)
 	if err != nil {
 		return fmt.Errorf("failed to initialize converter: %w", err)
+=======
+	var converter common.RowProvider
+	var convErr error
+
+	if info.IsDir() {
+		converter, convErr = filesystem.NewFilesystemConverter(inputFile)
+	} else {
+		ext := filepath.Ext(inputPath)
+		switch ext {
+		case ".csv":
+			converter, convErr = csv.NewCSVConverter(inputFile)
+		case ".xlsx", ".xls":
+			converter, convErr = excel.NewExcelConverter(inputFile)
+		case ".zip":
+			converter, convErr = zip.NewZipConverter(inputFile)
+		case ".html", ".htm":
+			converter, convErr = html.NewHTMLConverter(inputFile)
+		case ".json":
+			converter, convErr = json.NewJSONConverter(inputFile)
+		case ".txt":
+			converter, convErr = txt.NewTxtConverter(inputFile)
+		default:
+			return fmt.Errorf("unsupported file type: %s", ext)
+		}
+	}
+
+	if convErr != nil {
+		return fmt.Errorf("failed to initialize converter: %w", convErr)
+>>>>>>> 93dfbc8 (Added support for alpha sortable text files.)
 	}
 
 	// Clean up converter resources if it implements io.Closer
@@ -168,3 +208,48 @@ func main() {
 		fmt.Printf("Successfully converted %s to %s\n", inputPath, outputPath)
 	}
 }
+<<<<<<< HEAD
+=======
+
+// exportToSQL exports a file as SQL statements to writer
+func exportToSQL(inputPath string, writer io.Writer) error {
+	// Check if input is a directory
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat input path: %w", err)
+	}
+
+	file, err := os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to open input file: %w", err)
+	}
+	defer file.Close()
+
+	if info.IsDir() {
+		converter := &filesystem.FilesystemConverter{}
+		return converter.ConvertToSQL(file, writer)
+	}
+
+	ext := filepath.Ext(inputPath)
+	var converter common.StreamConverter
+
+	switch ext {
+	case ".csv":
+		converter = &csv.CSVConverter{}
+	case ".xlsx", ".xls":
+		converter = &excel.ExcelConverter{}
+	case ".zip":
+		converter = &zip.ZipConverter{}
+	case ".html", ".htm":
+		converter = &html.HTMLConverter{}
+	case ".json":
+		converter = &json.JSONConverter{}
+	case ".txt":
+		converter = &txt.TxtConverter{}
+	default:
+		return fmt.Errorf("unsupported file type: %s", ext)
+	}
+
+	return converter.ConvertToSQL(file, writer)
+}
+>>>>>>> 93dfbc8 (Added support for alpha sortable text files.)
