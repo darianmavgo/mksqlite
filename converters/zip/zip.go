@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"fmt"
 	"io"
+	"log"
 	"mksqlite/converters"
 	"mksqlite/converters/common"
 	"os"
@@ -21,10 +22,16 @@ func (d *zipDriver) Open(source io.Reader) (common.RowProvider, error) {
 	return NewZipConverter(source)
 }
 
+// SizableReaderAt interface for inputs that support random access and size query
+type SizableReaderAt interface {
+	io.ReaderAt
+	Size() (int64, error)
+}
+
 // ZipConverter converts ZIP archive file lists to SQLite tables
 type ZipConverter struct {
-	zipReader *zip.Reader
-	tempFile  *os.File // To be cleaned up if a temp file was used
+	files    []FastZipEntry
+	tempFile *os.File // To be cleaned up if a temp file was used
 }
 
 // Ensure ZipConverter implements RowProvider
@@ -47,18 +54,36 @@ func (z *ZipConverter) Close() error {
 
 // NewZipConverter creates a new ZipConverter from an io.Reader
 func NewZipConverter(r io.Reader) (*ZipConverter, error) {
-	var zipReader *zip.Reader
-	var err error
+	var files []FastZipEntry
 	var tempFile *os.File
+	var err error
 
+	// Check if input supports ReaderAt and Size (Fast Path)
+	// 1. *os.File
 	if f, ok := r.(*os.File); ok {
 		info, err := f.Stat()
 		if err != nil {
 			return nil, fmt.Errorf("failed to stat file: %w", err)
 		}
-		zipReader, err = zip.NewReader(f, info.Size())
+		log.Printf("FastZip: Using fast path for file %s (size %d)", f.Name(), info.Size())
+		files, _, err = ParseCentralDirectoryFast(f, info.Size())
+		if err != nil {
+			return nil, fmt.Errorf("fast parsing failed: %w", err)
+		}
+	} else if sa, ok := r.(SizableReaderAt); ok {
+		// 2. Custom SizableReaderAt (e.g. HTTP Range Reader)
+		size, err := sa.Size()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get size from reader: %w", err)
+		}
+		log.Printf("FastZip: Using fast path for SizableReaderAt (size %d)", size)
+		files, _, err = ParseCentralDirectoryFast(sa, size)
+		if err != nil {
+			return nil, fmt.Errorf("fast parsing failed: %w", err)
+		}
 	} else {
-		// Create temp file instead of reading fully into memory
+		// 3. Fallback: stream to temp file
+		log.Println("FastZip: Input is stream, falling back to temp file download")
 		tempFile, err = os.CreateTemp("", "mksqlite-zip-*.zip")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temp file: %w", err)
@@ -81,14 +106,31 @@ func NewZipConverter(r io.Reader) (*ZipConverter, error) {
 			return nil, fmt.Errorf("failed to stat temp file: %w", err)
 		}
 
-		zipReader, err = zip.NewReader(tempFile, info.Size())
+		// Use standard library for temp file (robustness), then convert to FastZipEntry
+		zReader, err := zip.NewReader(tempFile, info.Size())
 		if err != nil {
 			cleanup()
 			return nil, fmt.Errorf("failed to create zip reader: %w", err)
 		}
+
+		for _, f := range zReader.File {
+			isDir := false
+			if f.FileInfo().IsDir() {
+				isDir = true
+			}
+			files = append(files, FastZipEntry{
+				Name:             f.Name,
+				Comment:          f.Comment,
+				Modified:         f.Modified,
+				UncompressedSize: f.UncompressedSize64,
+				CompressedSize:   f.CompressedSize64,
+				CRC32:            f.CRC32,
+				IsDir:            isDir,
+			})
+		}
 	}
 
-	return &ZipConverter{zipReader: zipReader, tempFile: tempFile}, nil
+	return &ZipConverter{files: files, tempFile: tempFile}, nil
 }
 
 // GetTableNames implements RowProvider
@@ -119,11 +161,11 @@ func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}) erro
 		return nil
 	}
 
-	// Iterate through files in the zip archive
-	for _, f := range z.zipReader.File {
+	// Iterate through files
+	for _, f := range z.files {
 		// Prepare values
 		isDir := "false"
-		if f.FileInfo().IsDir() {
+		if f.IsDir {
 			isDir = "true"
 		}
 
@@ -131,8 +173,8 @@ func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}) erro
 			f.Name,
 			f.Comment,
 			f.Modified.Format(time.RFC3339),
-			f.UncompressedSize64,
-			f.CompressedSize64,
+			f.UncompressedSize,
+			f.CompressedSize,
 			f.CRC32,
 			isDir,
 		}
@@ -146,10 +188,6 @@ func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}) erro
 
 // ConvertToSQL implements StreamConverter for ZIP files
 func (z *ZipConverter) ConvertToSQL(writer io.Writer) error {
-	if z.zipReader == nil {
-		return fmt.Errorf("ZipConverter not initialized")
-	}
-
 	// Write CREATE TABLE
 	tableName := "file_list"
 	headers := z.GetHeaders(tableName)
@@ -158,9 +196,9 @@ func (z *ZipConverter) ConvertToSQL(writer io.Writer) error {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
 
-	for _, f := range z.zipReader.File {
+	for _, f := range z.files {
 		isDir := "false"
-		if f.FileInfo().IsDir() {
+		if f.IsDir {
 			isDir = "true"
 		}
 
@@ -169,8 +207,8 @@ func (z *ZipConverter) ConvertToSQL(writer io.Writer) error {
 			f.Name,
 			f.Comment,
 			f.Modified.Format(time.RFC3339),
-			fmt.Sprintf("%d", f.UncompressedSize64),
-			fmt.Sprintf("%d", f.CompressedSize64),
+			fmt.Sprintf("%d", f.UncompressedSize),
+			fmt.Sprintf("%d", f.CompressedSize),
 			fmt.Sprintf("%d", f.CRC32),
 			isDir,
 		}
