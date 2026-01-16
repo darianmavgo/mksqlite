@@ -197,17 +197,21 @@ func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}) err
 
 		// Stream the rest
 		for c.decoder.More() {
-			var val interface{}
+			var val json.RawMessage
 			if err := c.decoder.Decode(&val); err != nil {
 				return fmt.Errorf("error decoding array element: %w", err)
 			}
 
-			rowMap, ok := val.(map[string]interface{})
-			if !ok {
-				rowMap = map[string]interface{}{"value": val}
+			var rowMap map[string]json.RawMessage
+			if len(val) > 0 && val[0] == '{' {
+				if err := json.Unmarshal(val, &rowMap); err != nil {
+					rowMap = map[string]json.RawMessage{"value": val}
+				}
+			} else {
+				rowMap = map[string]json.RawMessage{"value": val}
 			}
 
-			row := flattenRow(rowMap, info.rawHeaders)
+			row := flattenRowRaw(rowMap, info.rawHeaders)
 			if err := yield(row); err != nil {
 				return err
 			}
@@ -255,6 +259,39 @@ func flattenRow(rowMap map[string]interface{}, rawHeaders []string) []interface{
 			}
 		default:
 			row[i] = v
+		}
+	}
+	return row
+}
+
+func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []interface{} {
+	row := make([]interface{}, len(rawHeaders))
+	for i, key := range rawHeaders {
+		val, ok := rowMap[key]
+		if !ok || len(val) == 0 {
+			row[i] = nil
+			continue
+		}
+
+		// Check for null
+		if string(val) == "null" {
+			row[i] = nil
+			continue
+		}
+
+		// Check if it's a complex type (object or array)
+		firstChar := val[0]
+		if firstChar == '{' || firstChar == '[' {
+			// It's complex, keep as string
+			row[i] = string(val)
+		} else {
+			// It's primitive, unmarshal it
+			var primitive interface{}
+			if err := json.Unmarshal(val, &primitive); err != nil {
+				row[i] = string(val) // Fallback
+			} else {
+				row[i] = primitive
+			}
 		}
 	}
 	return row
