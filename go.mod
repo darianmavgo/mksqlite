@@ -1,4 +1,4 @@
-module mksqlite
+module github.com/darianmavgo/mksqlite
 
 go 1.25.0
 
