@@ -56,4 +56,8 @@ go.work.sum
 
 # === Test Output ===
 sample_out/
+test_output/
+
+# === Logs ===
+logs/
 
