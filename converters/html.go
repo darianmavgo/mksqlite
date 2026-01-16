@@ -242,12 +242,17 @@ func extractTable(n *html.Node) tableData {
 }
 
 func extractText(n *html.Node) string {
+	var sb strings.Builder
+	extractTextRecursive(n, &sb)
+	return strings.TrimSpace(sb.String())
+}
+
+func extractTextRecursive(n *html.Node, sb *strings.Builder) {
 	if n.Type == html.TextNode {
-		return n.Data
+		sb.WriteString(n.Data)
+		return
 	}
-	var text string
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		text += extractText(c)
+		extractTextRecursive(c, sb)
 	}
-	return strings.TrimSpace(text)
 }
