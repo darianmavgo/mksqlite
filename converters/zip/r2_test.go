@@ -1,8 +1,6 @@
 package zip_test
 
 import (
-	"fmt"
-	"io"
 	"mksqlite/converters"
 	"mksqlite/converters/zip"
 	"net/http"
@@ -10,27 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 )
-
-// R2FaultyReader simulates a stream interruption
-type R2FaultyReader struct {
-	Body        io.ReadCloser
-	ReadCount   int64
-	FailAtBytes int64
-}
-
-func (r *R2FaultyReader) Read(p []byte) (n int, err error) {
-	n, err = r.Body.Read(p)
-	r.ReadCount += int64(n)
-	if r.ReadCount > r.FailAtBytes {
-		r.Body.Close()
-		return n, fmt.Errorf("simulated stream interruption at %d bytes", r.ReadCount)
-	}
-	return n, err
-}
-
-func (r *R2FaultyReader) Close() error {
-	return r.Body.Close()
-}
 
 func TestZipStreamingFromR2(t *testing.T) {
 	url := "https://pub-a1c6b68deb9d48e1b5783f84723c93ec.r2.dev/sample_data/history.db.zip"
@@ -44,22 +21,9 @@ func TestZipStreamingFromR2(t *testing.T) {
 		t.Fatalf("Failed to fetch from R2: status %d", resp.StatusCode)
 	}
 
-	// Zip requires full read usually (random access for central directory).
-	// If interrupted during "download" (copy to temp file), it should fail.
-	failAt := int64(1024)
-	if resp.ContentLength > 0 {
-		failAt = resp.ContentLength * 4 / 5
-	}
-
-	faultyReader := &R2FaultyReader{
-		Body:        resp.Body,
-		FailAtBytes: failAt,
-	}
-
-	converter, err := zip.NewZipConverter(faultyReader)
+	converter, err := zip.NewZipConverter(resp.Body)
 	if err != nil {
-		t.Logf("NewZipConverter interrupt handled (likely failed during copy to temp file): %v", err)
-		return
+		t.Fatalf("NewZipConverter failed: %v", err)
 	}
 	defer converter.Close()
 
@@ -75,9 +39,8 @@ func TestZipStreamingFromR2(t *testing.T) {
 	defer dbFile.Close()
 
 	err = converters.ImportToSQLite(converter, dbFile)
-	if err == nil {
-		t.Log("ImportToSQLite succeeded")
-	} else {
-		t.Logf("ImportToSQLite interrupted: %v", err)
+	if err != nil {
+		t.Fatalf("ImportToSQLite failed: %v", err)
 	}
+	t.Log("ImportToSQLite succeeded")
 }
