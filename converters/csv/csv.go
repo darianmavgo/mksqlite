@@ -1,6 +1,7 @@
 package csv
 
 import (
+	"bufio"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -27,9 +28,9 @@ var emptyPadding = make([]string, 1024)
 
 // CSVConverter converts CSV files to SQLite tables
 type CSVConverter struct {
-	headers      []string
-	csvReader    *csv.Reader // Used for streaming from an io.Reader
-	bufferedRows [][]string  // Buffer for scanned rows
+	headers   []string
+	csvReader *csv.Reader // Used for streaming from an io.Reader
+	Config    common.ConversionConfig
 }
 
 // Ensure CSVConverter implements RowProvider
@@ -42,6 +43,19 @@ var _ common.StreamConverter = (*CSVConverter)(nil)
 // This allows streaming data from a source (e.g. HTTP response) without a local file.
 // Note: scanRows can only be called once in this mode.
 func NewCSVConverter(r io.Reader) (*CSVConverter, error) {
+	br := bufio.NewReader(r)
+
+	// Peek at first 2KB to detect delimiter
+	peekBytes, _ := br.Peek(2048)
+	sample := string(peekBytes)
+	if idx := strings.IndexAny(sample, "\r\n"); idx != -1 {
+		sample = sample[:idx]
+	}
+
+	delim := common.DetectDelimiter(sample)
+
+	reader := csv.NewReader(br)
+	reader.Comma = delim
 	return NewCSVConverterWithConfig(r, nil)
 }
 
@@ -101,9 +115,12 @@ func NewCSVConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*C
 	sanitizedHeaders := common.GenColumnNames(filteredHeaders)
 
 	return &CSVConverter{
-		headers:      sanitizedHeaders,
-		csvReader:    reader,
-		bufferedRows: bufferedRows,
+		headers:   sanitizedHeaders,
+		csvReader: reader,
+		Config: common.ConversionConfig{
+			Delimiter: delim,
+			TableName: CSVTB,
+		},
 	}, nil
 }
 
@@ -301,7 +318,19 @@ func (c *CSVConverter) ConvertToSQL(writer io.Writer) error {
 // parseCSV reads CSV data from reader and returns sanitized headers and rows.
 // This is a helper function primarily used for testing or small files.
 func parseCSV(reader io.Reader) ([]string, [][]string, error) {
-	csvReader := csv.NewReader(reader)
+	br := bufio.NewReader(reader)
+
+	// Peek at first 2KB to detect delimiter
+	peekBytes, _ := br.Peek(2048)
+	sample := string(peekBytes)
+	if idx := strings.IndexAny(sample, "\r\n"); idx != -1 {
+		sample = sample[:idx]
+	}
+
+	delim := common.DetectDelimiter(sample)
+
+	csvReader := csv.NewReader(br)
+	csvReader.Comma = delim
 	csvReader.FieldsPerRecord = -1 // Allow variable number of fields
 	headers, err := csvReader.Read()
 	if err != nil {
