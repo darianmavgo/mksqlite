@@ -51,7 +51,7 @@ func TestTxtConverter_LargeFile(t *testing.T) {
 	}
 	defer dbFile.Close()
 
-	if err := converters.ImportToSQLite(conv, dbFile); err != nil {
+	if err := converters.ImportToSQLite(conv, dbFile, nil); err != nil {
 		t.Fatalf("ImportToSQLite failed: %v", err)
 	}
 

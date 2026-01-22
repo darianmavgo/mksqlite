@@ -17,11 +17,16 @@ var (
 	BatchSize = 1000
 )
 
+// ImportOptions defines configuration for the import process.
+type ImportOptions struct {
+	LogErrors bool // If true, errors are logged to a table instead of aborting.
+}
+
 // ImportToSQLite imports data from a RowProvider and writes the resulting SQLite database
 // to the provided io.Writer.
 // If writer is an *os.File, it writes directly to that file to allow partial data persistence.
 // Otherwise, it uses a temporary file for construction and copies it to the writer.
-func ImportToSQLite(provider common.RowProvider, writer io.Writer) error {
+func ImportToSQLite(provider common.RowProvider, writer io.Writer, opts *ImportOptions) error {
 	var dbPath string
 	var useTemp bool = true
 
@@ -54,7 +59,7 @@ func ImportToSQLite(provider common.RowProvider, writer io.Writer) error {
 	}
 
 	// Populate database
-	err = populateDB(db, provider)
+	err = populateDB(db, provider, opts)
 	db.Close() // Close database connection
 
 	if useTemp {
@@ -79,7 +84,21 @@ func ImportToSQLite(provider common.RowProvider, writer io.Writer) error {
 }
 
 // populateDB handles the common logic of creating tables and inserting rows
-func populateDB(db *sql.DB, provider common.RowProvider) error {
+func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) error {
+	logErrors := opts != nil && opts.LogErrors
+
+	if logErrors {
+		_, err := db.Exec(`CREATE TABLE IF NOT EXISTS _mksqlite_errors (
+			timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+			message TEXT,
+			table_name TEXT,
+			row_data TEXT
+		)`)
+		if err != nil {
+			return fmt.Errorf("failed to create error log table: %w", err)
+		}
+	}
+
 	tableNames := provider.GetTableNames()
 	for _, tableName := range tableNames {
 		headers := provider.GetHeaders(tableName)
@@ -113,10 +132,32 @@ func populateDB(db *sql.DB, provider common.RowProvider) error {
 			return fmt.Errorf("failed to prepare insert statement for table %s: %w", tableName, err)
 		}
 
+		// Prepare log statement if needed
+		var logStmt *sql.Stmt
+		if logErrors {
+			logStmt, err = tx.Prepare(`INSERT INTO _mksqlite_errors (message, table_name, row_data) VALUES (?, ?, ?)`)
+			if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to prepare log statement: %w", err)
+			}
+		}
+
 		rowCount := 0
 
 		// Insert rows using streaming ScanRows
-		err = provider.ScanRows(tableName, func(row []interface{}) error {
+		err = provider.ScanRows(tableName, func(row []interface{}, rowErr error) error {
+			if rowErr != nil {
+				if logErrors {
+					// Log provider error
+					rowData := fmt.Sprintf("%v", row) // Best effort string rep (might be nil or empty)
+					if _, err := logStmt.Exec(rowErr.Error(), tableName, rowData); err != nil {
+						return fmt.Errorf("failed to log error: %w", err)
+					}
+					return nil // Continue
+				}
+				return rowErr
+			}
+
 			// Ensure row has the same number of columns as headers
 			if len(row) < len(headers) {
 				// Pad with nil (NULL)
@@ -129,12 +170,23 @@ func populateDB(db *sql.DB, provider common.RowProvider) error {
 
 			_, err := stmt.Exec(row...)
 			if err != nil {
+				if logErrors {
+					// Log insertion error
+					rowData := fmt.Sprintf("%v", row)
+					if _, err := logStmt.Exec(err.Error(), tableName, rowData); err != nil {
+						return fmt.Errorf("failed to log insert error: %w", err)
+					}
+					return nil // Continue
+				}
 				return fmt.Errorf("failed to insert row in table %s: %w", tableName, err)
 			}
 
 			rowCount++
 			if rowCount%BatchSize == 0 {
 				stmt.Close()
+				if logStmt != nil {
+					logStmt.Close()
+				}
 				if err := tx.Commit(); err != nil {
 					return fmt.Errorf("failed to commit transaction for table %s: %w", tableName, err)
 				}
@@ -149,11 +201,21 @@ func populateDB(db *sql.DB, provider common.RowProvider) error {
 					tx.Rollback()
 					return fmt.Errorf("failed to prepare insert statement for table %s: %w", tableName, err)
 				}
+				if logErrors {
+					logStmt, err = tx.Prepare(`INSERT INTO _mksqlite_errors (message, table_name, row_data) VALUES (?, ?, ?)`)
+					if err != nil {
+						tx.Rollback()
+						return fmt.Errorf("failed to prepare log statement: %w", err)
+					}
+				}
 			}
 			return nil
 		})
 
 		stmt.Close() // Close statement before commit/rollback
+		if logStmt != nil {
+			logStmt.Close()
+		}
 
 		if err != nil {
 			tx.Rollback()

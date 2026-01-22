@@ -78,7 +78,7 @@ func (c *HTMLConverter) GetHeaders(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (c *HTMLConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
+func (c *HTMLConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	for i, name := range c.tableNames {
 		if name == tableName {
 			rows := c.tables[i].rows
@@ -87,7 +87,7 @@ func (c *HTMLConverter) ScanRows(tableName string, yield func([]interface{}) err
 				for c, val := range row {
 					interfaceRow[c] = val
 				}
-				if err := yield(interfaceRow); err != nil {
+				if err := yield(interfaceRow, nil); err != nil {
 					return err
 				}
 			}

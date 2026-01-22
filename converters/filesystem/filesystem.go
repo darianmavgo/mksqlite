@@ -73,7 +73,7 @@ func (c *FilesystemConverter) GetHeaders(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
+func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	if tableName != FSTB {
 		return nil
 	}
@@ -108,7 +108,7 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 			relPath, name, size, ext, modTime, isDir,
 		}
 
-		return yield(row)
+		return yield(row, nil)
 	})
 
 	if err != nil {

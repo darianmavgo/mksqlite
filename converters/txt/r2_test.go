@@ -93,7 +93,7 @@ func TestTxtStreamingFromR2(t *testing.T) {
 	converters.BatchSize = 100
 	defer func() { converters.BatchSize = originalBatchSize }()
 
-	err = converters.ImportToSQLite(converter, dbFile)
+	err = converters.ImportToSQLite(converter, dbFile, nil)
 	if err == nil {
 		t.Log("ImportToSQLite succeeded")
 	} else {

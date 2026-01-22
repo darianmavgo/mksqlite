@@ -40,7 +40,7 @@ func getDriverName(path string, isDir bool) (string, error) {
 }
 
 // FileToSQLite converts a file to SQLite using the appropriate converter
-func FileToSQLite(inputPath, outputPath string) error {
+func FileToSQLite(inputPath, outputPath string, opts *converters.ImportOptions) error {
 	info, err := os.Stat(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat input path: %w", err)
@@ -80,7 +80,7 @@ func FileToSQLite(inputPath, outputPath string) error {
 	}
 	defer outputFile.Close()
 
-	return converters.ImportToSQLite(converter, outputFile)
+	return converters.ImportToSQLite(converter, outputFile, opts)
 }
 
 // exportToSQL exports a file as SQL statements to writer
@@ -120,23 +120,36 @@ func exportToSQL(inputPath string, writer io.Writer) error {
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	args := os.Args[1:]
+	logMode := false
+
+	// Filter out --log flag
+	var cleanArgs []string
+	for _, arg := range args {
+		if arg == "--log" {
+			logMode = true
+		} else {
+			cleanArgs = append(cleanArgs, arg)
+		}
+	}
+
+	if len(cleanArgs) < 1 {
 		fmt.Println("Usage:")
-		fmt.Println("  mksqlite <input_file> [output_db]          # Convert to SQLite database")
-		fmt.Println("  mksqlite --sql <input_file> [output_file]  # Export as SQL statements")
+		fmt.Println("  mksqlite [--log] <input_file> [output_db]          # Convert to SQLite database")
+		fmt.Println("  mksqlite --sql <input_file> [output_file]          # Export as SQL statements")
 		os.Exit(1)
 	}
 
-	if os.Args[1] == "--sql" {
-		if len(os.Args) < 3 {
+	if cleanArgs[0] == "--sql" {
+		if len(cleanArgs) < 2 {
 			fmt.Println("Usage: mksqlite --sql <input_file> [output_file]")
 			os.Exit(1)
 		}
-		inputPath := os.Args[2]
+		inputPath := cleanArgs[1]
 
 		var writer io.Writer
-		if len(os.Args) >= 4 {
-			outputPath := os.Args[3]
+		if len(cleanArgs) >= 3 {
+			outputPath := cleanArgs[2]
 			f, err := os.Create(outputPath)
 			if err != nil {
 				fmt.Printf("Error creating output file: %v\n", err)
@@ -154,15 +167,15 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		inputPath := os.Args[1]
+		inputPath := cleanArgs[0]
 		var outputPath string
-		if len(os.Args) >= 3 {
-			outputPath = os.Args[2]
+		if len(cleanArgs) >= 2 {
+			outputPath = cleanArgs[1]
 		} else {
 			outputPath = inputPath + ".db"
 		}
 
-		err := FileToSQLite(inputPath, outputPath)
+		err := FileToSQLite(inputPath, outputPath, &converters.ImportOptions{LogErrors: logMode})
 		if err != nil {
 			fmt.Printf("Error converting file: %v\n", err)
 			os.Exit(1)

@@ -66,7 +66,7 @@ func TestStreamingInterruption(t *testing.T) {
 	}
 
 	// 4. Run ImportToSQLite
-	tmpDir := "../../test_output/streaming_test"
+	tmpDir := "../test_output/streaming_test"
 	if err := os.RemoveAll(tmpDir); err != nil {
 		t.Fatalf("Failed to clean tmp dir: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestStreamingInterruption(t *testing.T) {
 	converters.BatchSize = 100
 	defer func() { converters.BatchSize = originalBatchSize }()
 
-	err = converters.ImportToSQLite(converter, outFile)
+	err = converters.ImportToSQLite(converter, outFile, nil)
 	if err == nil {
 		t.Log("ImportToSQLite succeeded unexpectedly (stream interruption didn't occur or was handled?)")
 	} else {

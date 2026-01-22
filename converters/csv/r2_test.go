@@ -77,7 +77,7 @@ func TestCSVStreamingFromR2(t *testing.T) {
 	converters.BatchSize = 10
 	defer func() { converters.BatchSize = originalBatchSize }()
 
-	err = converters.ImportToSQLite(converter, dbFile)
+	err = converters.ImportToSQLite(converter, dbFile, nil)
 	if err == nil {
 		t.Log("ImportToSQLite succeeded, maybe file was too small to interrupt?")
 	} else {

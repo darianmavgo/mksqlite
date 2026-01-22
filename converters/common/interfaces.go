@@ -20,8 +20,9 @@ type RowProvider interface {
 	GetHeaders(tableName string) []string
 	// ScanRows iterates over rows for the given table.
 	// It calls the yield function for each row.
+	// The yield function accepts a row and an optional error associated with that row.
 	// If yield returns an error, iteration stops and that error is returned.
-	ScanRows(tableName string, yield func([]interface{}) error) error
+	ScanRows(tableName string, yield func([]interface{}, error) error) error
 }
 
 // Driver defines the interface that must be implemented by each converter driver.

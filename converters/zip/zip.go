@@ -156,7 +156,7 @@ func (z *ZipConverter) GetHeaders(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
+func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	if tableName != "file_list" {
 		return nil
 	}
@@ -179,7 +179,7 @@ func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}) erro
 			isDir,
 		}
 
-		if err := yield(values); err != nil {
+		if err := yield(values, nil); err != nil {
 			return err
 		}
 	}
