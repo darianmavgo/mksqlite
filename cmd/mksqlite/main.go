@@ -3,6 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/darianmavgo/mksqlite/config"
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
 	_ "github.com/darianmavgo/mksqlite/converters/csv"
@@ -10,11 +15,9 @@ import (
 	_ "github.com/darianmavgo/mksqlite/converters/filesystem"
 	_ "github.com/darianmavgo/mksqlite/converters/html"
 	_ "github.com/darianmavgo/mksqlite/converters/json"
+	_ "github.com/darianmavgo/mksqlite/converters/markdown"
 	_ "github.com/darianmavgo/mksqlite/converters/txt"
 	_ "github.com/darianmavgo/mksqlite/converters/zip"
-	"os"
-	"path/filepath"
-	"strings"
 )
 
 func getDriverName(path string, isDir bool) (string, error) {
@@ -33,6 +36,8 @@ func getDriverName(path string, isDir bool) (string, error) {
 		return "html", nil
 	case ".json":
 		return "json", nil
+	case ".md":
+		return "markdown", nil
 	case ".txt":
 		return "txt", nil
 	}
@@ -40,7 +45,7 @@ func getDriverName(path string, isDir bool) (string, error) {
 }
 
 // FileToSQLite converts a file to SQLite using the appropriate converter
-func FileToSQLite(inputPath, outputPath string, opts *converters.ImportOptions) error {
+func FileToSQLite(inputPath, outputPath string, config *common.ConversionConfig) error {
 	info, err := os.Stat(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat input path: %w", err)
@@ -57,7 +62,7 @@ func FileToSQLite(inputPath, outputPath string, opts *converters.ImportOptions) 
 	}
 	defer inputFile.Close()
 
-	converter, err := converters.Open(driverName, inputFile)
+	converter, err := converters.Open(driverName, inputFile, config)
 	if err != nil {
 		return fmt.Errorf("failed to initialize converter: %w", err)
 	}
@@ -84,7 +89,7 @@ func FileToSQLite(inputPath, outputPath string, opts *converters.ImportOptions) 
 }
 
 // exportToSQL exports a file as SQL statements to writer
-func exportToSQL(inputPath string, writer io.Writer) error {
+func exportToSQL(inputPath string, writer io.Writer, config *common.ConversionConfig) error {
 	info, err := os.Stat(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat input path: %w", err)
@@ -101,7 +106,7 @@ func exportToSQL(inputPath string, writer io.Writer) error {
 	}
 	defer file.Close()
 
-	converter, err := converters.Open(driverName, file)
+	converter, err := converters.Open(driverName, file, config)
 	if err != nil {
 		return fmt.Errorf("failed to initialize converter: %w", err)
 	}
@@ -161,7 +166,7 @@ func main() {
 			writer = os.Stdout
 		}
 
-		err := exportToSQL(inputPath, writer)
+		err := exportToSQL(inputPath, writer, config)
 		if err != nil {
 			fmt.Printf("Error exporting SQL: %v\n", err)
 			os.Exit(1)

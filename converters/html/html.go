@@ -16,7 +16,7 @@ func init() {
 
 type htmlDriver struct{}
 
-func (d *htmlDriver) Open(source io.Reader) (common.RowProvider, error) {
+func (d *htmlDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
 	return NewHTMLConverter(source)
 }
 

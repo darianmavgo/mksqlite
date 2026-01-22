@@ -22,7 +22,7 @@ func init() {
 
 type filesystemDriver struct{}
 
-func (d *filesystemDriver) Open(source io.Reader) (common.RowProvider, error) {
+func (d *filesystemDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
 	return NewFilesystemConverter(source)
 }
 

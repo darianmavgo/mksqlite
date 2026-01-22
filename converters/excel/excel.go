@@ -16,16 +16,17 @@ func init() {
 
 type excelDriver struct{}
 
-func (d *excelDriver) Open(source io.Reader) (common.RowProvider, error) {
-	return NewExcelConverter(source)
+func (d *excelDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
+	return NewExcelConverterWithConfig(source, config)
 }
 
 // ExcelConverter converts Excel files to SQLite tables
 type ExcelConverter struct {
-	tableNames []string
-	headers    map[string][]string // map tableName to headers
-	sheetMap   map[string]string   // map tableName to sheetName
-	file       *excelize.File
+	tableNames     []string
+	headers        map[string][]string // map tableName to headers
+	sheetMap       map[string]string   // map tableName to sheetName
+	file           *excelize.File
+	headerRowIndex map[string]int // map tableName to header row index (0-based)
 }
 
 // Ensure ExcelConverter implements RowProvider
@@ -39,6 +40,11 @@ var _ io.Closer = (*ExcelConverter)(nil)
 
 // NewExcelConverter creates a new ExcelConverter from an io.Reader
 func NewExcelConverter(r io.Reader) (*ExcelConverter, error) {
+	return NewExcelConverterWithConfig(r, nil)
+}
+
+// NewExcelConverterWithConfig creates a new ExcelConverter from an io.Reader with optional config
+func NewExcelConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*ExcelConverter, error) {
 	// Open Excel stream
 	f, err := excelize.OpenReader(r)
 	if err != nil {
@@ -55,35 +61,64 @@ func NewExcelConverter(r io.Reader) (*ExcelConverter, error) {
 	tableNames := common.GenTableNames(sheets)
 	headersMap := make(map[string][]string)
 	sheetMap := make(map[string]string)
+	headerRowIndex := make(map[string]int)
 
 	for idx, sheetName := range sheets {
 		tableName := tableNames[idx]
 		sheetMap[tableName] = sheetName
+		headerRowIndex[tableName] = 0 // Default
 
-		// Use iterator to get just the first row for headers
+		// Use iterator to get rows
 		rows, err := f.Rows(sheetName)
 		if err != nil {
 			f.Close()
 			return nil, fmt.Errorf("failed to get rows iterator for sheet %s: %w", sheetName, err)
 		}
 
-		if rows.Next() {
-			headerRow, err := rows.Columns()
+		var scannedRows [][]string
+		// Scan up to 10 rows or finding header if no advanced detection
+		limit := 1
+		if config != nil && config.AdvancedHeaderDetection {
+			limit = 10
+		}
+
+		for i := 0; i < limit && rows.Next(); i++ {
+			cols, err := rows.Columns()
 			if err != nil {
 				rows.Close()
 				f.Close()
-				return nil, fmt.Errorf("failed to read header row for sheet %s: %w", sheetName, err)
+				return nil, fmt.Errorf("failed to read row for sheet %s: %w", sheetName, err)
 			}
-			headersMap[tableName] = common.GenColumnNames(headerRow)
+			scannedRows = append(scannedRows, cols)
 		}
 		rows.Close()
+
+		var headerRow []string
+		if config != nil && config.AdvancedHeaderDetection {
+			idx := common.AssessHeaderRow(scannedRows, 10)
+			if idx >= 0 && idx < len(scannedRows) {
+				headerRow = scannedRows[idx]
+				headerRowIndex[tableName] = idx
+			} else if len(scannedRows) > 0 {
+				headerRow = scannedRows[0]
+			}
+		} else {
+			if len(scannedRows) > 0 {
+				headerRow = scannedRows[0]
+			}
+		}
+
+		if len(headerRow) > 0 {
+			headersMap[tableName] = common.GenColumnNames(headerRow)
+		}
 	}
 
 	return &ExcelConverter{
-		tableNames: tableNames,
-		headers:    headersMap,
-		sheetMap:   sheetMap,
-		file:       f,
+		tableNames:     tableNames,
+		headers:        headersMap,
+		sheetMap:       sheetMap,
+		file:           f,
+		headerRowIndex: headerRowIndex,
 	}, nil
 }
 
@@ -110,12 +145,14 @@ func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}, er
 	}
 	defer rows.Close()
 
-	// Skip header row
-	if rows.Next() {
-		// Just consume the first row
-		_, err := rows.Columns()
-		if err != nil {
-			return err
+	// Skip rows up to header
+	skipCount := e.headerRowIndex[tableName] + 1
+	for i := 0; i < skipCount; i++ {
+		if rows.Next() {
+			_, err := rows.Columns()
+			if err != nil {
+				return err
+			}
 		}
 	}
 
