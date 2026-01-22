@@ -19,16 +19,17 @@ func init() {
 
 type csvDriver struct{}
 
-func (d *csvDriver) Open(source io.Reader) (common.RowProvider, error) {
-	return NewCSVConverter(source)
+func (d *csvDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
+	return NewCSVConverterWithConfig(source, config)
 }
 
 var emptyPadding = make([]string, 1024)
 
 // CSVConverter converts CSV files to SQLite tables
 type CSVConverter struct {
-	headers   []string
-	csvReader *csv.Reader // Used for streaming from an io.Reader
+	headers      []string
+	csvReader    *csv.Reader // Used for streaming from an io.Reader
+	bufferedRows [][]string  // Buffer for scanned rows
 }
 
 // Ensure CSVConverter implements RowProvider
@@ -41,11 +42,52 @@ var _ common.StreamConverter = (*CSVConverter)(nil)
 // This allows streaming data from a source (e.g. HTTP response) without a local file.
 // Note: scanRows can only be called once in this mode.
 func NewCSVConverter(r io.Reader) (*CSVConverter, error) {
+	return NewCSVConverterWithConfig(r, nil)
+}
+
+// NewCSVConverterWithConfig creates a new CSVConverter from an io.Reader with optional config.
+func NewCSVConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*CSVConverter, error) {
 	reader := csv.NewReader(r)
 	reader.FieldsPerRecord = -1 // Allow variable number of fields
-	headers, err := reader.Read()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CSV headers: %w", err)
+
+	var headers []string
+	var bufferedRows [][]string
+
+	if config != nil && config.AdvancedHeaderDetection {
+		var scanRows [][]string
+		// Read up to 10 rows
+		for i := 0; i < 10; i++ {
+			row, err := reader.Read()
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return nil, fmt.Errorf("failed to read CSV row for assessment: %w", err)
+			}
+			scanRows = append(scanRows, row)
+		}
+
+		idx := common.AssessHeaderRow(scanRows, 10)
+		if len(scanRows) > 0 {
+			if idx >= 0 && idx < len(scanRows) {
+				headers = scanRows[idx]
+				if idx+1 < len(scanRows) {
+					bufferedRows = scanRows[idx+1:]
+				}
+			} else {
+				headers = scanRows[0]
+				if len(scanRows) > 1 {
+					bufferedRows = scanRows[1:]
+				}
+			}
+		}
+	} else {
+		// Default behavior: First row is header
+		h, err := reader.Read()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CSV headers: %w", err)
+		}
+		headers = h
 	}
 
 	// Filter out empty headers and sanitize
@@ -59,8 +101,9 @@ func NewCSVConverter(r io.Reader) (*CSVConverter, error) {
 	sanitizedHeaders := common.GenColumnNames(filteredHeaders)
 
 	return &CSVConverter{
-		headers:   sanitizedHeaders,
-		csvReader: reader,
+		headers:      sanitizedHeaders,
+		csvReader:    reader,
+		bufferedRows: bufferedRows,
 	}, nil
 }
 
@@ -111,6 +154,17 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) erro
 	// Producer goroutine
 	go func() {
 		defer close(rowsCh)
+
+		// Send buffered rows first
+		for _, row := range c.bufferedRows {
+			row = padRow(row, len(c.headers))
+			interfaceRow := make([]interface{}, len(row))
+			for i, val := range row {
+				interfaceRow[i] = val
+			}
+			rowsCh <- interfaceRow
+		}
+
 		for {
 			row, err := reader.Read()
 			if err != nil {
@@ -170,6 +224,13 @@ func (c *CSVConverter) ConvertToSQL(writer io.Writer) error {
 	// Producer goroutine
 	go func() {
 		defer close(rowsCh)
+
+		// Send buffered rows
+		for _, row := range c.bufferedRows {
+			row = padRow(row, len(c.headers))
+			rowsCh <- row
+		}
+
 		for {
 			row, err := c.csvReader.Read()
 			if err != nil {
