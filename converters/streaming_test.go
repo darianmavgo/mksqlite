@@ -66,7 +66,7 @@ func TestStreamingInterruption(t *testing.T) {
 	}
 
 	// 4. Run ImportToSQLite
-	tmpDir := "../../test_output/streaming_test"
+	tmpDir := "../sample_out/streaming_test"
 	if err := os.RemoveAll(tmpDir); err != nil {
 		t.Fatalf("Failed to clean tmp dir: %v", err)
 	}
