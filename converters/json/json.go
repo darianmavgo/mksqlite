@@ -16,7 +16,7 @@ func init() {
 
 type jsonDriver struct{}
 
-func (d *jsonDriver) Open(source io.Reader) (common.RowProvider, error) {
+func (d *jsonDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
 	return NewJSONConverter(source)
 }
 

@@ -93,6 +93,82 @@ func GenColumnTypes(columnnames []string) []string {
 	return coltypes
 }
 
+// AssessHeaderRow scans up to N rows and returns the index of the best candidate for the header row.
+// It returns -1 if no suitable header is found (which implies defaults should be used).
+func AssessHeaderRow(rows [][]string, maxScan int) int {
+	if len(rows) == 0 {
+		return 0
+	}
+
+	// Scan up to maxScan rows
+	limit := len(rows)
+	if limit > maxScan {
+		limit = maxScan
+	}
+
+	bestScore := -1.0
+	bestIndex := 0
+
+	for i := 0; i < limit; i++ {
+		row := rows[i]
+		if len(row) == 0 {
+			continue
+		}
+
+		score := 0.0
+
+		// Criterion 1: All columns are non-empty strings
+		nonEmptyCount := 0
+		for _, val := range row {
+			if strings.TrimSpace(val) != "" {
+				nonEmptyCount++
+			}
+		}
+		if nonEmptyCount == len(row) {
+			score += 2.0
+		} else if nonEmptyCount > len(row)/2 {
+			score += 1.0
+		}
+
+		// Criterion 2: Uniqueness
+		seen := make(map[string]bool)
+		unique := true
+		for _, val := range row {
+			if seen[val] {
+				unique = false
+				break
+			}
+			seen[val] = true
+		}
+		if unique {
+			score += 2.0
+		}
+
+		// Criterion 3: Length comparison with next row (if exists)
+		if i+1 < len(rows) {
+			nextRow := rows[i+1]
+			// Ideally header row should have same column count as data
+			if len(row) == len(nextRow) {
+				score += 1.0
+			}
+		}
+
+		// Criterion 4: Row length bonus
+		// Prefer rows with more columns (up to a point) to avoid picking 1-column metadata rows
+		score += float64(len(row)) * 0.5
+
+		// Preference for earlier rows
+		score -= float64(i) * 0.1
+
+		if score > bestScore {
+			bestScore = score
+			bestIndex = i
+		}
+	}
+
+	return bestIndex
+}
+
 // GenPreparedStmt generates a prepared statement for the specified operation
 func GenPreparedStmt(table string, fields []string, stmtType SQLStmtType) (string, error) {
 	// Validate inputs
