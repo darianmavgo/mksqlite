@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/darianmavgo/mksqlite/config"
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
 	_ "github.com/darianmavgo/mksqlite/converters/csv"
@@ -45,7 +44,7 @@ func getDriverName(path string, isDir bool) (string, error) {
 }
 
 // FileToSQLite converts a file to SQLite using the appropriate converter
-func FileToSQLite(inputPath, outputPath string, config *common.ConversionConfig) error {
+func FileToSQLite(inputPath, outputPath string, config *common.ConversionConfig, opts *converters.ImportOptions) error {
 	info, err := os.Stat(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat input path: %w", err)
@@ -166,7 +165,7 @@ func main() {
 			writer = os.Stdout
 		}
 
-		err := exportToSQL(inputPath, writer, config)
+		err := exportToSQL(inputPath, writer, nil)
 		if err != nil {
 			fmt.Printf("Error exporting SQL: %v\n", err)
 			os.Exit(1)
@@ -180,7 +179,7 @@ func main() {
 			outputPath = inputPath + ".db"
 		}
 
-		err := FileToSQLite(inputPath, outputPath, &converters.ImportOptions{LogErrors: logMode})
+		err := FileToSQLite(inputPath, outputPath, nil, &converters.ImportOptions{LogErrors: logMode})
 		if err != nil {
 			fmt.Printf("Error converting file: %v\n", err)
 			os.Exit(1)

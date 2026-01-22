@@ -130,7 +130,7 @@ Some text.
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			conv, err := NewMarkdownConverter(strings.NewReader(tt.input))
+			conv, err := NewMarkdownConverter(strings.NewReader(tt.input), nil)
 			if err != nil {
 				t.Fatalf("NewMarkdownConverter failed: %v", err)
 			}
@@ -168,7 +168,10 @@ Some text.
 				}
 
 				var rows [][]interface{}
-				err := conv.ScanRows(tableName, func(row []interface{}) error {
+				err := conv.ScanRows(tableName, func(row []interface{}, err error) error {
+					if err != nil {
+						return err
+					}
 					rows = append(rows, row)
 					return nil
 				})
@@ -212,7 +215,7 @@ func TestConvertToSQL(t *testing.T) {
 |---|---|
 | dark_mode | true |
 `
-	conv, err := NewMarkdownConverter(strings.NewReader(input))
+	conv, err := NewMarkdownConverter(strings.NewReader(input), nil)
 	if err != nil {
 		t.Fatalf("NewMarkdownConverter failed: %v", err)
 	}

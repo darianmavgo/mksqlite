@@ -5,9 +5,10 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"strings"
+
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
-	"strings"
 )
 
 const (
@@ -28,9 +29,10 @@ var emptyPadding = make([]string, 1024)
 
 // CSVConverter converts CSV files to SQLite tables
 type CSVConverter struct {
-	headers   []string
-	csvReader *csv.Reader // Used for streaming from an io.Reader
-	Config    common.ConversionConfig
+	headers      []string
+	bufferedRows [][]string
+	csvReader    *csv.Reader
+	Config       common.ConversionConfig
 }
 
 // Ensure CSVConverter implements RowProvider
@@ -43,33 +45,43 @@ var _ common.StreamConverter = (*CSVConverter)(nil)
 // This allows streaming data from a source (e.g. HTTP response) without a local file.
 // Note: scanRows can only be called once in this mode.
 func NewCSVConverter(r io.Reader) (*CSVConverter, error) {
-	br := bufio.NewReader(r)
-
-	// Peek at first 2KB to detect delimiter
-	peekBytes, _ := br.Peek(2048)
-	sample := string(peekBytes)
-	if idx := strings.IndexAny(sample, "\r\n"); idx != -1 {
-		sample = sample[:idx]
-	}
-
-	delim := common.DetectDelimiter(sample)
-
-	reader := csv.NewReader(br)
-	reader.Comma = delim
 	return NewCSVConverterWithConfig(r, nil)
 }
 
 // NewCSVConverterWithConfig creates a new CSVConverter from an io.Reader with optional config.
 func NewCSVConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*CSVConverter, error) {
-	reader := csv.NewReader(r)
+	if config == nil {
+		config = &common.ConversionConfig{
+			TableName: CSVTB,
+		}
+	}
+
+	if config.TableName == "" {
+		config.TableName = CSVTB
+	}
+
+	br := bufio.NewReader(r)
+
+	// Detect delimiter if not set
+	if config.Delimiter == 0 {
+		peekBytes, _ := br.Peek(2048)
+		sample := string(peekBytes)
+		if idx := strings.IndexAny(sample, "\r\n"); idx != -1 {
+			sample = sample[:idx]
+		}
+		config.Delimiter = common.DetectDelimiter(sample)
+	}
+
+	reader := csv.NewReader(br)
+	reader.Comma = config.Delimiter
 	reader.FieldsPerRecord = -1 // Allow variable number of fields
 
 	var headers []string
 	var bufferedRows [][]string
 
-	if config != nil && config.AdvancedHeaderDetection {
+	if config.AdvancedHeaderDetection {
 		var scanRows [][]string
-		// Read up to 10 rows
+		// Read up to 10 rows for assessment
 		for i := 0; i < 10; i++ {
 			row, err := reader.Read()
 			if err != nil {
@@ -81,8 +93,8 @@ func NewCSVConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*C
 			scanRows = append(scanRows, row)
 		}
 
-		idx := common.AssessHeaderRow(scanRows, 10)
 		if len(scanRows) > 0 {
+			idx := common.AssessHeaderRow(scanRows, 10)
 			if idx >= 0 && idx < len(scanRows) {
 				headers = scanRows[idx]
 				if idx+1 < len(scanRows) {
@@ -99,39 +111,33 @@ func NewCSVConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*C
 		// Default behavior: First row is header
 		h, err := reader.Read()
 		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("CSV file is empty")
+			}
 			return nil, fmt.Errorf("failed to read CSV headers: %w", err)
 		}
 		headers = h
 	}
 
-	// Filter out empty headers and sanitize
-	var filteredHeaders []string
-	for _, header := range headers {
-		if strings.TrimSpace(header) != "" {
-			filteredHeaders = append(filteredHeaders, strings.TrimSpace(header))
-		}
-	}
-
-	sanitizedHeaders := common.GenColumnNames(filteredHeaders)
+	// Sanitize headers
+	sanitizedHeaders := common.GenColumnNames(headers)
 
 	return &CSVConverter{
-		headers:   sanitizedHeaders,
-		csvReader: reader,
-		Config: common.ConversionConfig{
-			Delimiter: delim,
-			TableName: CSVTB,
-		},
+		headers:      sanitizedHeaders,
+		bufferedRows: bufferedRows,
+		csvReader:    reader,
+		Config:       *config,
 	}, nil
 }
 
 // GetTableNames implements RowProvider
 func (c *CSVConverter) GetTableNames() []string {
-	return []string{CSVTB}
+	return []string{c.Config.TableName}
 }
 
 // GetHeaders implements RowProvider
 func (c *CSVConverter) GetHeaders(tableName string) []string {
-	if tableName == CSVTB {
+	if tableName == c.Config.TableName {
 		return c.headers
 	}
 	return nil
@@ -154,7 +160,7 @@ func padRow(row []string, targetLen int) []string {
 
 // ScanRows implements RowProvider using a worker pattern (pipelining) to improve streaming performance.
 func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
-	if tableName != CSVTB {
+	if tableName != c.Config.TableName {
 		return nil
 	}
 
@@ -183,7 +189,7 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 			for i, val := range row {
 				interfaceRow[i] = val
 			}
-			rowsCh <- interfaceRow
+			rowsCh <- rowOrError{row: interfaceRow}
 		}
 
 		for {
@@ -229,7 +235,7 @@ func (c *CSVConverter) ConvertToSQL(writer io.Writer) error {
 	}
 
 	// Write CREATE TABLE statement
-	createTableSQL := common.GenCreateTableSQL(CSVTB, c.headers)
+	createTableSQL := common.GenCreateTableSQL(c.Config.TableName, c.headers)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
@@ -267,7 +273,7 @@ func (c *CSVConverter) ConvertToSQL(writer io.Writer) error {
 
 	// Consumer (Main Thread)
 	for row := range rowsCh {
-		if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", CSVTB); err != nil {
+		if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", c.Config.TableName); err != nil {
 			return fmt.Errorf("failed to write INSERT start: %w", err)
 		}
 
@@ -313,57 +319,4 @@ func (c *CSVConverter) ConvertToSQL(writer io.Writer) error {
 	default:
 		return nil
 	}
-}
-
-// parseCSV reads CSV data from reader and returns sanitized headers and rows.
-// This is a helper function primarily used for testing or small files.
-func parseCSV(reader io.Reader) ([]string, [][]string, error) {
-	br := bufio.NewReader(reader)
-
-	// Peek at first 2KB to detect delimiter
-	peekBytes, _ := br.Peek(2048)
-	sample := string(peekBytes)
-	if idx := strings.IndexAny(sample, "\r\n"); idx != -1 {
-		sample = sample[:idx]
-	}
-
-	delim := common.DetectDelimiter(sample)
-
-	csvReader := csv.NewReader(br)
-	csvReader.Comma = delim
-	csvReader.FieldsPerRecord = -1 // Allow variable number of fields
-	headers, err := csvReader.Read()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read CSV headers: %w", err)
-	}
-
-	// Filter out empty headers and sanitize
-	var filteredHeaders []string
-	for _, header := range headers {
-		if strings.TrimSpace(header) != "" {
-			filteredHeaders = append(filteredHeaders, strings.TrimSpace(header))
-		}
-	}
-
-	// Sanitize headers for SQL column names
-	sanitizedHeaders := common.GenColumnNames(filteredHeaders)
-
-	// Read all rows
-	var rows [][]string
-	for {
-		row, err := csvReader.Read()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, nil, fmt.Errorf("failed to read CSV row: %w", err)
-		}
-
-		// Ensure row has the same number of columns as filtered headers
-		row = padRow(row, len(sanitizedHeaders))
-
-		rows = append(rows, row)
-	}
-
-	return sanitizedHeaders, rows, nil
 }

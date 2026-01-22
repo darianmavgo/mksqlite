@@ -3,12 +3,13 @@ package csv
 import (
 	"database/sql"
 	"fmt"
-	"github.com/darianmavgo/mksqlite/converters"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/darianmavgo/mksqlite/converters"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -193,14 +194,28 @@ func TestCSVParseCSV(t *testing.T) {
 	}
 	defer file.Close()
 
-	headers, rows, err := parseCSV(file)
+	converter, err := NewCSVConverter(file)
 	if err != nil {
-		t.Fatalf("parseCSV failed: %v", err)
+		t.Fatalf("NewCSVConverter failed: %v", err)
 	}
 
+	headers := converter.GetHeaders(CSVTB)
 	if len(headers) == 0 {
 		t.Error("Expected headers, but got none")
 	}
+
+	var rows [][]interface{}
+	err = converter.ScanRows(CSVTB, func(row []interface{}, err error) error {
+		if err != nil {
+			return err
+		}
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ScanRows failed: %v", err)
+	}
+
 	if len(rows) == 0 {
 		t.Error("Expected rows, but got none")
 	}

@@ -17,8 +17,8 @@ func init() {
 
 type markdownDriver struct{}
 
-func (d *markdownDriver) Open(source io.Reader) (common.RowProvider, error) {
-	return NewMarkdownConverter(source)
+func (d *markdownDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
+	return NewMarkdownConverter(source, config)
 }
 
 // MarkdownConverter converts Markdown files to SQLite tables
@@ -40,7 +40,7 @@ var _ common.RowProvider = (*MarkdownConverter)(nil)
 var _ common.StreamConverter = (*MarkdownConverter)(nil)
 
 // NewMarkdownConverter creates a new MarkdownConverter from an io.Reader
-func NewMarkdownConverter(r io.Reader) (*MarkdownConverter, error) {
+func NewMarkdownConverter(r io.Reader, config *common.ConversionConfig) (*MarkdownConverter, error) {
 	tables, err := parseMarkdown(r)
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func (c *MarkdownConverter) GetHeaders(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (c *MarkdownConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
+func (c *MarkdownConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	for i, name := range c.tableNames {
 		if name == tableName {
 			rows := c.tables[i].rows
@@ -88,7 +88,7 @@ func (c *MarkdownConverter) ScanRows(tableName string, yield func([]interface{})
 				for c, val := range row {
 					interfaceRow[c] = val
 				}
-				if err := yield(interfaceRow); err != nil {
+				if err := yield(interfaceRow, nil); err != nil {
 					return err
 				}
 			}
@@ -254,12 +254,8 @@ func parseTable(lines []string, name string) (tableData, int) {
 	splitRow := func(l string) []string {
 		// remove leading/trailing pipes if present
 		l = strings.TrimSpace(l)
-		if strings.HasPrefix(l, "|") {
-			l = l[1:]
-		}
-		if strings.HasSuffix(l, "|") {
-			l = l[:len(l)-1]
-		}
+		l = strings.TrimPrefix(l, "|")
+		l = strings.TrimSuffix(l, "|")
 		parts := strings.Split(l, "|")
 		for k, v := range parts {
 			parts[k] = strings.TrimSpace(v)
