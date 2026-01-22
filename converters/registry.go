@@ -28,14 +28,14 @@ func Register(name string, driver common.Driver) {
 }
 
 // Open opens a converter by driver name and source reader.
-func Open(driverName string, source io.Reader) (common.RowProvider, error) {
+func Open(driverName string, source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
 	driversMu.RLock()
 	driver, ok := drivers[driverName]
 	driversMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("converters: unknown driver %q (forgotten import?)", driverName)
 	}
-	return driver.Open(source)
+	return driver.Open(source, config)
 }
 
 // Drivers returns a sorted list of the names of the registered drivers.

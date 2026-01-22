@@ -28,5 +28,5 @@ type RowProvider interface {
 type Driver interface {
 	// Open returns a new RowProvider instance that reads from the given source.
 	// The returned RowProvider should also implement StreamConverter if SQL export is supported.
-	Open(source io.Reader) (RowProvider, error)
+	Open(source io.Reader, config *ConversionConfig) (RowProvider, error)
 }

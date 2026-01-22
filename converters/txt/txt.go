@@ -19,7 +19,7 @@ func init() {
 
 type txtDriver struct{}
 
-func (d *txtDriver) Open(source io.Reader) (common.RowProvider, error) {
+func (d *txtDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
 	return NewTxtConverter(source)
 }
 
