@@ -50,7 +50,7 @@ func TestJSONArray(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = converters.ImportToSQLite(conv, f)
+	err = converters.ImportToSQLite(conv, f, nil)
 	f.Close()
 
 	if err != nil {
@@ -132,7 +132,7 @@ func TestJSONObject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = converters.ImportToSQLite(conv, f)
+	err = converters.ImportToSQLite(conv, f, nil)
 	f.Close()
 	if err != nil {
 		t.Fatalf("Import failed: %v", err)
@@ -172,7 +172,7 @@ func TestJSONNested(t *testing.T) {
 	os.Remove(outPath)
 
 	f, _ := os.Create(outPath)
-	converters.ImportToSQLite(conv, f)
+	converters.ImportToSQLite(conv, f, nil)
 	f.Close()
 
 	db, _ := sql.Open("sqlite3", outPath)

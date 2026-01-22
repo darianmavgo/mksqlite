@@ -153,7 +153,7 @@ func padRow(row []string, targetLen int) []string {
 }
 
 // ScanRows implements RowProvider using a worker pattern (pipelining) to improve streaming performance.
-func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
+func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	if tableName != CSVTB {
 		return nil
 	}
@@ -164,9 +164,13 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) erro
 
 	reader := c.csvReader
 
+	type rowOrError struct {
+		row []interface{}
+		err error
+	}
+
 	// Channel to pipeline reading and processing
-	rowsCh := make(chan []interface{}, 100)
-	errCh := make(chan error, 1)
+	rowsCh := make(chan rowOrError, 100)
 
 	// Producer goroutine
 	go func() {
@@ -188,8 +192,10 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) erro
 				if err == io.EOF {
 					break
 				}
-				errCh <- fmt.Errorf("failed to read CSV row: %w", err)
-				return
+				// Send error to consumer
+				rowsCh <- rowOrError{err: fmt.Errorf("failed to read CSV row: %w", err)}
+				// Continue reading next row
+				continue
 			}
 
 			// Ensure row has the same number of columns as headers
@@ -201,24 +207,18 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}) erro
 				interfaceRow[i] = val
 			}
 
-			rowsCh <- interfaceRow
+			rowsCh <- rowOrError{row: interfaceRow}
 		}
 	}()
 
 	// Consumer (Main Thread)
-	for row := range rowsCh {
-		if err := yield(row); err != nil {
+	for item := range rowsCh {
+		if err := yield(item.row, item.err); err != nil {
 			return err
 		}
 	}
 
-	// Check for producer error
-	select {
-	case err := <-errCh:
-		return err
-	default:
-		return nil
-	}
+	return nil
 }
 
 // ConvertToSQL implements StreamConverter for CSV files (outputs SQL to writer).

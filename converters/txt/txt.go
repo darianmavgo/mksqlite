@@ -55,7 +55,7 @@ func (c *TxtConverter) GetHeaders(tableName string) []string {
 }
 
 // ScanRows implements RowProvider using a worker pattern (pipelining) to improve streaming performance.
-func (c *TxtConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
+func (c *TxtConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	if tableName != TXTTB {
 		return nil
 	}
@@ -86,7 +86,7 @@ func (c *TxtConverter) ScanRows(tableName string, yield func([]interface{}) erro
 
 	// Consumer (Main Thread)
 	for row := range rowsCh {
-		if err := yield(row); err != nil {
+		if err := yield(row, nil); err != nil {
 			return err
 		}
 	}

@@ -85,7 +85,7 @@ func FileToSQLite(inputPath, outputPath string, config *common.ConversionConfig)
 	}
 	defer outputFile.Close()
 
-	return converters.ImportToSQLite(converter, outputFile)
+	return converters.ImportToSQLite(converter, outputFile, opts)
 }
 
 // exportToSQL exports a file as SQL statements to writer
@@ -125,109 +125,36 @@ func exportToSQL(inputPath string, writer io.Writer, config *common.ConversionCo
 }
 
 func main() {
-	// Parse arguments manually to support --config flag anywhere and export-config
-	var configPath string
-	var args []string // Filtered arguments (excluding flags handled here)
-	args = append(args, os.Args[0]) // Keep program name
+	args := os.Args[1:]
+	logMode := false
 
-	for i := 1; i < len(os.Args); i++ {
-		if os.Args[i] == "--config" {
-			if i+1 < len(os.Args) {
-				configPath = os.Args[i+1]
-				i++ // skip value
-			} else {
-				fmt.Println("Error: --config requires a file path")
-				os.Exit(1)
-			}
+	// Filter out --log flag
+	var cleanArgs []string
+	for _, arg := range args {
+		if arg == "--log" {
+			logMode = true
 		} else {
-			args = append(args, os.Args[i])
+			cleanArgs = append(cleanArgs, arg)
 		}
 	}
 
-	// Initialize config with defaults
-	cfg := config.DefaultConfig()
-
-	// Load config if provided (overriding defaults)
-	if configPath != "" {
-		loadedCfg, err := config.Load(configPath)
-		if err != nil {
-			fmt.Printf("Error loading config: %v\n", err)
-			os.Exit(1)
-		}
-		cfg = loadedCfg
-	}
-
-	// Apply configuration to global state
-	if cfg.BatchSize > 0 {
-		converters.BatchSize = cfg.BatchSize
-	}
-
-	// Handle export-config subcommand
-	if len(args) > 1 && args[1] == "export-config" {
-		outputPath := "config.hcl"
-		if len(args) > 2 {
-			outputPath = args[2]
-		}
-
-		if err := config.Export(outputPath, cfg); err != nil {
-			fmt.Printf("Error exporting config: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("Configuration exported to %s\n", outputPath)
-		return
-	}
-
-	if len(args) < 2 {
+	if len(cleanArgs) < 1 {
 		fmt.Println("Usage:")
-		fmt.Println("  mksqlite <input_file> [output_db]          # Convert to SQLite database")
-		fmt.Println("  mksqlite --sql <input_file> [output_file]  # Export as SQL statements")
-		fmt.Println("  mksqlite export-config [output_file]       # Export configuration")
-		fmt.Println("\nOptions:")
-		fmt.Println("  --config <file>                            # Use specified configuration file")
+		fmt.Println("  mksqlite [--log] <input_file> [output_db]          # Convert to SQLite database")
+		fmt.Println("  mksqlite --sql <input_file> [output_file]          # Export as SQL statements")
 		os.Exit(1)
 	}
 
-	if args[1] == "--sql" {
-		if len(args) < 3 {
+	if cleanArgs[0] == "--sql" {
+		if len(cleanArgs) < 2 {
 			fmt.Println("Usage: mksqlite --sql <input_file> [output_file]")
 			os.Exit(1)
 		}
-		inputPath := args[2]
+		inputPath := cleanArgs[1]
 
 		var writer io.Writer
-		if len(args) >= 4 {
-			outputPath := args[3]
-		fmt.Println("  --advanced-header                          # Enable advanced header detection")
-		os.Exit(1)
-	}
-
-	config := &common.ConversionConfig{}
-	var args []string
-
-	for i := 1; i < len(os.Args); i++ {
-		if os.Args[i] == "--advanced-header" {
-			config.AdvancedHeaderDetection = true
-		} else {
-			args = append(args, os.Args[i])
-		}
-	}
-
-	if len(args) < 1 {
-		fmt.Println("Usage: mksqlite [--advanced-header] <input_file> [output_db]")
-		fmt.Println("       mksqlite [--advanced-header] --sql <input_file> [output_file]")
-		os.Exit(1)
-	}
-
-	if args[0] == "--sql" {
-		if len(args) < 2 {
-			fmt.Println("Usage: mksqlite [--advanced-header] --sql <input_file> [output_file]")
-			os.Exit(1)
-		}
-		inputPath := args[1]
-
-		var writer io.Writer
-		if len(args) >= 3 {
-			outputPath := args[2]
+		if len(cleanArgs) >= 3 {
+			outputPath := cleanArgs[2]
 			f, err := os.Create(outputPath)
 			if err != nil {
 				fmt.Printf("Error creating output file: %v\n", err)
@@ -245,19 +172,15 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		inputPath := args[1]
+		inputPath := cleanArgs[0]
 		var outputPath string
-		if len(args) >= 3 {
-			outputPath = args[2]
-		inputPath := args[0]
-		var outputPath string
-		if len(args) >= 2 {
-			outputPath = args[1]
+		if len(cleanArgs) >= 2 {
+			outputPath = cleanArgs[1]
 		} else {
 			outputPath = inputPath + ".db"
 		}
 
-		err := FileToSQLite(inputPath, outputPath, config)
+		err := FileToSQLite(inputPath, outputPath, &converters.ImportOptions{LogErrors: logMode})
 		if err != nil {
 			fmt.Printf("Error converting file: %v\n", err)
 			os.Exit(1)

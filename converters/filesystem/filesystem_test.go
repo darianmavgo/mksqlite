@@ -61,7 +61,7 @@ func TestFilesystemConvertFile(t *testing.T) {
 	}
 	defer outFile.Close()
 
-	err = converters.ImportToSQLite(converter, outFile)
+	err = converters.ImportToSQLite(converter, outFile, nil)
 	if err != nil {
 		t.Fatalf("ImportToSQLite failed: %v", err)
 	}

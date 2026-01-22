@@ -193,7 +193,7 @@ func (c *JSONConverter) GetHeaders(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
+func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	info, ok := c.tables[tableName]
 	if !ok {
 		return nil
@@ -204,7 +204,7 @@ func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}) err
 		// Yield first row if exists
 		if c.firstRow != nil {
 			row := flattenRow(c.firstRow, info.rawHeaders)
-			if err := yield(row); err != nil {
+			if err := yield(row, nil); err != nil {
 				return err
 			}
 			c.firstRow = nil // Consumed
@@ -227,7 +227,7 @@ func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}) err
 			}
 
 			row := flattenRowRaw(rowMap, info.rawHeaders)
-			if err := yield(row); err != nil {
+			if err := yield(row, nil); err != nil {
 				return err
 			}
 		}
@@ -244,7 +244,7 @@ func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}) err
 					rowMap = map[string]interface{}{"value": val}
 				}
 				row := flattenRow(rowMap, info.rawHeaders)
-				if err := yield(row); err != nil {
+				if err := yield(row, nil); err != nil {
 					return err
 				}
 			}
@@ -321,7 +321,10 @@ func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
 			return err
 		}
 
-		err := c.ScanRows(tableName, func(row []interface{}) error {
+		err := c.ScanRows(tableName, func(row []interface{}, err error) error {
+			if err != nil {
+				return err
+			}
 			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", tableName); err != nil {
 				return err
 			}

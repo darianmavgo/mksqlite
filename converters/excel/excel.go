@@ -133,7 +133,7 @@ func (e *ExcelConverter) GetHeaders(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}) error) error {
+func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	sheetName, ok := e.sheetMap[tableName]
 	if !ok {
 		return nil // Should not happen if GetTableNames is correct
@@ -168,7 +168,7 @@ func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}) er
 			interfaceRow[i] = val
 		}
 
-		if err := yield(interfaceRow); err != nil {
+		if err := yield(interfaceRow, nil); err != nil {
 			return err
 		}
 	}
@@ -202,7 +202,10 @@ func (e *ExcelConverter) ConvertToSQL(writer io.Writer) error {
 			return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 		}
 
-		err := e.ScanRows(tableName, func(row []interface{}) error {
+		err := e.ScanRows(tableName, func(row []interface{}, err error) error {
+			if err != nil {
+				return err
+			}
 			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", tableName); err != nil {
 				return fmt.Errorf("failed to write INSERT start: %w", err)
 			}

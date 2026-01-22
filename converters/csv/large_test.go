@@ -72,7 +72,7 @@ func TestLargeShakespeareCSV(t *testing.T) {
 	// Ensure batch size is standard
 	// converters.BatchSize = 1000 // default
 
-	err = converters.ImportToSQLite(converter, dbFile)
+	err = converters.ImportToSQLite(converter, dbFile, nil)
 	if err == nil {
 		t.Log("ImportToSQLite succeeded (surprisingly, if we expected interruption)")
 	} else {
