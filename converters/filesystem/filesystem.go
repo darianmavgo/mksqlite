@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"github.com/darianmavgo/mksqlite/converters"
-	"github.com/darianmavgo/mksqlite/converters/common"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/common"
 )
 
 const (

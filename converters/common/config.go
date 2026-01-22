@@ -9,6 +9,7 @@ type ConversionConfig struct {
 	Delimiter               rune   // Delimiter used for CSV/text parsing
 	TableName               string // Name of the table
 	AdvancedHeaderDetection bool
+	Verbose                 bool // Enable detailed logging
 }
 
 // DetectDelimiter attempts to detect the delimiter from a raw line of text.

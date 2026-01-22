@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"github.com/darianmavgo/mksqlite/converters/common"
+	"log"
 	"os"
+
+	"github.com/darianmavgo/mksqlite/converters/common"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -20,6 +22,7 @@ var (
 // ImportOptions defines configuration for the import process.
 type ImportOptions struct {
 	LogErrors bool // If true, errors are logged to a table instead of aborting.
+	Verbose   bool // If true, enables detailed logging.
 }
 
 // ImportToSQLite imports data from a RowProvider and writes the resulting SQLite database
@@ -37,6 +40,9 @@ func ImportToSQLite(provider common.RowProvider, writer io.Writer, opts *ImportO
 		if err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
 			dbPath = f.Name()
 			useTemp = false
+			if opts != nil && opts.Verbose {
+				log.Printf("[MKSQLITE] Using direct file: %s", dbPath)
+			}
 		}
 	}
 
@@ -49,6 +55,9 @@ func ImportToSQLite(provider common.RowProvider, writer io.Writer, opts *ImportO
 		dbPath = tmpFile.Name()
 		tmpFile.Close() // Close it so sql.Open can use it
 
+		if opts != nil && opts.Verbose {
+			log.Printf("[MKSQLITE] Created temp file: %s", dbPath)
+		}
 		defer os.Remove(dbPath) // Clean up temp file
 	}
 
@@ -59,6 +68,9 @@ func ImportToSQLite(provider common.RowProvider, writer io.Writer, opts *ImportO
 	}
 
 	// Populate database
+	if opts != nil && opts.Verbose {
+		log.Printf("[MKSQLITE] Starting database population...")
+	}
 	err = populateDB(db, provider, opts)
 	db.Close() // Close database connection
 
@@ -74,12 +86,18 @@ func ImportToSQLite(provider common.RowProvider, writer io.Writer, opts *ImportO
 		}
 		defer f.Close()
 
+		if opts != nil && opts.Verbose {
+			log.Printf("[MKSQLITE] Copying temp database to final output...")
+		}
 		// Copy to writer
 		if _, err := io.Copy(writer, f); err != nil {
 			return fmt.Errorf("failed to write to output: %w", err)
 		}
 	}
 
+	if opts != nil && opts.Verbose {
+		log.Printf("[MKSQLITE] Conversion completed successfully.")
+	}
 	return err
 }
 
@@ -108,6 +126,9 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 		}
 
 		// Create table
+		if opts != nil && opts.Verbose {
+			log.Printf("[MKSQLITE] Creating table: %s with headers: %v", tableName, headers)
+		}
 		createTableSQL := common.GenCreateTableSQL(tableName, headers)
 		_, err := db.Exec(createTableSQL)
 		if err != nil {
@@ -224,6 +245,9 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("failed to commit transaction for table %s: %w", tableName, err)
+		}
+		if opts != nil && opts.Verbose {
+			log.Printf("[MKSQLITE] Finished table %s, total rows: %d", tableName, rowCount)
 		}
 	}
 	return nil

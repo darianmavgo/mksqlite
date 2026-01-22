@@ -2,11 +2,12 @@ package filesystem
 
 import (
 	"database/sql"
-	"github.com/darianmavgo/mksqlite/converters"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/darianmavgo/mksqlite/converters"
 
 	_ "github.com/mattn/go-sqlite3"
 )
