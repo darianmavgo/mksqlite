@@ -15,6 +15,7 @@ import (
 	_ "github.com/darianmavgo/mksqlite/converters/filesystem"
 	_ "github.com/darianmavgo/mksqlite/converters/html"
 	_ "github.com/darianmavgo/mksqlite/converters/json"
+	_ "github.com/darianmavgo/mksqlite/converters/markdown"
 	_ "github.com/darianmavgo/mksqlite/converters/txt"
 	_ "github.com/darianmavgo/mksqlite/converters/zip"
 )
@@ -35,6 +36,8 @@ func getDriverName(path string, isDir bool) (string, error) {
 		return "html", nil
 	case ".json":
 		return "json", nil
+	case ".md":
+		return "markdown", nil
 	case ".txt":
 		return "txt", nil
 	}
