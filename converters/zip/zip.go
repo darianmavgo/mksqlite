@@ -18,7 +18,7 @@ func init() {
 
 type zipDriver struct{}
 
-func (d *zipDriver) Open(source io.Reader) (common.RowProvider, error) {
+func (d *zipDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
 	return NewZipConverter(source)
 }
 
