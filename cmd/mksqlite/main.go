@@ -8,15 +8,8 @@ import (
 	"strings"
 
 	"github.com/darianmavgo/mksqlite/converters"
+	_ "github.com/darianmavgo/mksqlite/converters/all"
 	"github.com/darianmavgo/mksqlite/converters/common"
-	_ "github.com/darianmavgo/mksqlite/converters/csv"
-	_ "github.com/darianmavgo/mksqlite/converters/excel"
-	_ "github.com/darianmavgo/mksqlite/converters/filesystem"
-	_ "github.com/darianmavgo/mksqlite/converters/html"
-	_ "github.com/darianmavgo/mksqlite/converters/json"
-	_ "github.com/darianmavgo/mksqlite/converters/markdown"
-	_ "github.com/darianmavgo/mksqlite/converters/txt"
-	_ "github.com/darianmavgo/mksqlite/converters/zip"
 )
 
 func getDriverName(path string, isDir bool) (string, error) {
