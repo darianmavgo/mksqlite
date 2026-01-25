@@ -20,12 +20,13 @@ func init() {
 type txtDriver struct{}
 
 func (d *txtDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
-	return NewTxtConverter(source)
+	return NewTxtConverterWithConfig(source, config)
 }
 
 // TxtConverter converts text files to SQLite tables (single column 'content')
 type TxtConverter struct {
 	scanner *bufio.Scanner
+	Config  common.ConversionConfig
 }
 
 // Ensure TxtConverter implements RowProvider
@@ -36,19 +37,35 @@ var _ common.StreamConverter = (*TxtConverter)(nil)
 
 // NewTxtConverter creates a new TxtConverter from an io.Reader.
 func NewTxtConverter(r io.Reader) (*TxtConverter, error) {
+	return NewTxtConverterWithConfig(r, nil)
+}
+
+// NewTxtConverterWithConfig creates a new TxtConverter from an io.Reader with optional config.
+func NewTxtConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*TxtConverter, error) {
+	if config == nil {
+		config = &common.ConversionConfig{
+			TableName: TXTTB,
+		}
+	}
+
+	if config.TableName == "" {
+		config.TableName = TXTTB
+	}
+
 	return &TxtConverter{
 		scanner: bufio.NewScanner(r),
+		Config:  *config,
 	}, nil
 }
 
 // GetTableNames implements RowProvider
 func (c *TxtConverter) GetTableNames() []string {
-	return []string{TXTTB}
+	return []string{c.Config.TableName}
 }
 
 // GetHeaders implements RowProvider
 func (c *TxtConverter) GetHeaders(tableName string) []string {
-	if tableName == TXTTB {
+	if tableName == c.Config.TableName {
 		return []string{"content"}
 	}
 	return nil
@@ -56,7 +73,7 @@ func (c *TxtConverter) GetHeaders(tableName string) []string {
 
 // ScanRows implements RowProvider using a worker pattern (pipelining) to improve streaming performance.
 func (c *TxtConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
-	if tableName != TXTTB {
+	if tableName != c.Config.TableName {
 		return nil
 	}
 
@@ -107,7 +124,7 @@ func (c *TxtConverter) ConvertToSQL(writer io.Writer) error {
 	}
 
 	// Write CREATE TABLE statement
-	createTableSQL := common.GenCreateTableSQL(TXTTB, []string{"content"})
+	createTableSQL := common.GenCreateTableSQL(c.Config.TableName, []string{"content"})
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
@@ -115,7 +132,7 @@ func (c *TxtConverter) ConvertToSQL(writer io.Writer) error {
 	for c.scanner.Scan() {
 		line := c.scanner.Text()
 
-		if _, err := fmt.Fprintf(writer, "INSERT INTO %s (content) VALUES (", TXTTB); err != nil {
+		if _, err := fmt.Fprintf(writer, "INSERT INTO %s (content) VALUES (", c.Config.TableName); err != nil {
 			return fmt.Errorf("failed to write INSERT start: %w", err)
 		}
 
