@@ -1,6 +1,7 @@
 package json
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -212,18 +213,41 @@ func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}, err
 
 		// Stream the rest
 		for c.decoder.More() {
-			var val json.RawMessage
-			if err := c.decoder.Decode(&val); err != nil {
-				return fmt.Errorf("error decoding array element: %w", err)
+			t, err := c.decoder.Token()
+			if err != nil {
+				return fmt.Errorf("error reading token: %w", err)
 			}
 
 			var rowMap map[string]json.RawMessage
-			if len(val) > 0 && val[0] == '{' {
-				if err := json.Unmarshal(val, &rowMap); err != nil {
-					rowMap = map[string]json.RawMessage{"value": val}
+			if delim, ok := t.(json.Delim); ok && delim == '{' {
+				// Object optimization: stream keys
+				rowMap = make(map[string]json.RawMessage)
+				for c.decoder.More() {
+					keyToken, err := c.decoder.Token()
+					if err != nil {
+						return fmt.Errorf("error reading key: %w", err)
+					}
+					key, ok := keyToken.(string)
+					if !ok {
+						return fmt.Errorf("expected string key")
+					}
+					var val json.RawMessage
+					if err := c.decoder.Decode(&val); err != nil {
+						return fmt.Errorf("error decoding value for key %s: %w", key, err)
+					}
+					rowMap[key] = val
+				}
+				// Consume closing '}'
+				if _, err := c.decoder.Token(); err != nil {
+					return fmt.Errorf("error reading closing brace: %w", err)
 				}
 			} else {
-				rowMap = map[string]json.RawMessage{"value": val}
+				// Non-object: fallback
+				raw, err := reconstructRawJSON(t, c.decoder)
+				if err != nil {
+					return fmt.Errorf("error reconstructing raw json: %w", err)
+				}
+				rowMap = map[string]json.RawMessage{"value": raw}
 			}
 
 			row := flattenRowRaw(rowMap, info.rawHeaders)
@@ -277,6 +301,82 @@ func flattenRow(rowMap map[string]interface{}, rawHeaders []string) []interface{
 		}
 	}
 	return row
+}
+
+func reconstructRawJSON(t json.Token, dec *json.Decoder) (json.RawMessage, error) {
+	delim, ok := t.(json.Delim)
+	if !ok {
+		// Primitive
+		return json.Marshal(t)
+	}
+
+	// It's a delimiter.
+	if delim == '[' {
+		// Array
+		var sb bytes.Buffer
+		sb.WriteByte('[')
+		first := true
+		for dec.More() {
+			if !first {
+				sb.WriteByte(',')
+			}
+			first = false
+
+			// We can use Decode(&raw) for elements
+			var val json.RawMessage
+			if err := dec.Decode(&val); err != nil {
+				return nil, err
+			}
+			sb.Write(val)
+		}
+		// Consume ']'
+		if _, err := dec.Token(); err != nil {
+			return nil, err
+		}
+		sb.WriteByte(']')
+		return json.RawMessage(sb.Bytes()), nil
+	}
+
+	// Should not happen for object roots handled by ScanRows, but good for completeness
+	if delim == '{' {
+		var sb bytes.Buffer
+		sb.WriteByte('{')
+		first := true
+		for dec.More() {
+			if !first {
+				sb.WriteByte(',')
+			}
+			first = false
+
+			// Key
+			k, err := dec.Token()
+			if err != nil {
+				return nil, err
+			}
+			key, ok := k.(string)
+			if !ok {
+				return nil, fmt.Errorf("expected string key")
+			}
+
+			keyBytes, _ := json.Marshal(key)
+			sb.Write(keyBytes)
+			sb.WriteByte(':')
+
+			// Value
+			var val json.RawMessage
+			if err := dec.Decode(&val); err != nil {
+				return nil, err
+			}
+			sb.Write(val)
+		}
+		if _, err := dec.Token(); err != nil {
+			return nil, err
+		}
+		sb.WriteByte('}')
+		return json.RawMessage(sb.Bytes()), nil
+	}
+
+	return nil, fmt.Errorf("unexpected delimiter: %v", delim)
 }
 
 func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []interface{} {

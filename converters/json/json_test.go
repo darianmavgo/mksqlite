@@ -218,3 +218,62 @@ func TestJSONConvertToSQL(t *testing.T) {
 		t.Error("Escaping failed")
 	}
 }
+
+func TestJSONPrimitiveFirst(t *testing.T) {
+	jsonContent := `[
+		"first",
+		{"value": "second"},
+        [1, 2]
+	]`
+
+	reader := strings.NewReader(jsonContent)
+	conv, err := NewJSONConverter(reader)
+	if err != nil {
+		t.Fatalf("Failed to create converter: %v", err)
+	}
+
+    // Headers should be ["value"]
+    headers := conv.GetHeaders("jsontb0")
+    if len(headers) != 1 || headers[0] != "value" {
+        t.Errorf("Expected headers [value], got %v", headers)
+    }
+
+	outputDir := "../../test_output/json_test"
+	os.MkdirAll(outputDir, 0755)
+	outPath := filepath.Join(outputDir, "json_prim.db")
+	os.Remove(outPath)
+
+	f, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = converters.ImportToSQLite(conv, f, nil)
+	f.Close()
+
+    db, err := sql.Open("sqlite3", outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT value FROM jsontb0")
+    if err != nil { t.Fatal(err) }
+    defer rows.Close()
+
+    var val string
+
+    // Row 1: "first"
+    rows.Next()
+    rows.Scan(&val)
+    if val != "first" { t.Errorf("Row 1: expected 'first', got %s", val) }
+
+    // Row 2: "second"
+    rows.Next()
+    rows.Scan(&val)
+    if val != "second" { t.Errorf("Row 2: expected 'second', got %s", val) }
+
+    // Row 3: "[1,2]" (array)
+    rows.Next()
+    rows.Scan(&val)
+    if val != "[1,2]" { t.Errorf("Row 3: expected '[1,2]', got '%s'", val) }
+}
