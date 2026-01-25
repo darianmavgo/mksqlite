@@ -1,6 +1,7 @@
 package csv
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -224,6 +225,42 @@ func TestCSVParseCSV(t *testing.T) {
 	for _, header := range headers {
 		if strings.ContainsAny(header, " !@#$%^&*()") {
 			t.Errorf("Header '%s' contains invalid characters", header)
+		}
+	}
+}
+
+func TestEscapingLogic(t *testing.T) {
+	// Input CSV content with single quotes
+	csvContent := `id,name
+1,O'Connor
+2,'Quote at start
+3,Quote at end'
+4,'Quote in 'middle'`
+
+	reader := strings.NewReader(csvContent)
+	converter, err := NewCSVConverter(reader)
+	if err != nil {
+		t.Fatalf("Failed to create converter: %v", err)
+	}
+
+	var output bytes.Buffer // bytes is not imported in csv_test.go yet, need to check
+	err = converter.ConvertToSQL(&output)
+	if err != nil {
+		t.Fatalf("ConvertToSQL failed: %v", err)
+	}
+
+	sqlOutput := output.String()
+
+	expectedStrings := []string{
+		"'O''Connor'",
+		"'''Quote at start'",
+		"'Quote at end'''",
+		"'''Quote in ''middle'''",
+	}
+
+	for _, expected := range expectedStrings {
+		if !strings.Contains(sqlOutput, expected) {
+			t.Errorf("Output missing expected escaped string: %s. \nGot: %s", expected, sqlOutput)
 		}
 	}
 }

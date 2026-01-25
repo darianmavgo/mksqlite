@@ -296,14 +296,34 @@ func (c *CSVConverter) ConvertToSQL(writer io.Writer) error {
 		// Write values
 		for i, val := range row {
 			if i > 0 {
-				if _, err := writer.Write([]byte(", ")); err != nil {
+				if _, err := io.WriteString(writer, ", "); err != nil {
 					return fmt.Errorf("failed to write value separator: %w", err)
 				}
 			}
+
+			if _, err := io.WriteString(writer, "'"); err != nil {
+				return fmt.Errorf("failed to write value start: %w", err)
+			}
+
 			// Escape single quotes by doubling them
-			escapedVal := strings.ReplaceAll(val, "'", "''")
-			if _, err := fmt.Fprintf(writer, "'%s'", escapedVal); err != nil {
-				return fmt.Errorf("failed to write value: %w", err)
+			last := 0
+			for j := 0; j < len(val); j++ {
+				if val[j] == '\'' {
+					if _, err := io.WriteString(writer, val[last:j+1]); err != nil {
+						return fmt.Errorf("failed to write value chunk: %w", err)
+					}
+					if _, err := io.WriteString(writer, "'"); err != nil {
+						return fmt.Errorf("failed to write escape quote: %w", err)
+					}
+					last = j + 1
+				}
+			}
+			if _, err := io.WriteString(writer, val[last:]); err != nil {
+				return fmt.Errorf("failed to write value end: %w", err)
+			}
+
+			if _, err := io.WriteString(writer, "'"); err != nil {
+				return fmt.Errorf("failed to write value end quote: %w", err)
 			}
 		}
 
