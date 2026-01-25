@@ -135,32 +135,41 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 			return fmt.Errorf("failed to create table %s: %w", tableName, err)
 		}
 
+		// Generate insert statement
+		insertSQL, err := common.GenPreparedStmt(tableName, headers, common.InsertStmt)
+		if err != nil {
+			return fmt.Errorf("failed to generate insert statement for table %s: %w", tableName, err)
+		}
+
+		// Prepare statement on connection
+		mainStmt, err := db.Prepare(insertSQL)
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert statement for table %s: %w", tableName, err)
+		}
+		defer mainStmt.Close()
+
+		var mainLogStmt *sql.Stmt
+		if logErrors {
+			mainLogStmt, err = db.Prepare(`INSERT INTO _mksqlite_errors (message, table_name, row_data) VALUES (?, ?, ?)`)
+			if err != nil {
+				return fmt.Errorf("failed to prepare log statement: %w", err)
+			}
+			defer mainLogStmt.Close()
+		}
+
 		// Begin transaction
 		tx, err := db.Begin()
 		if err != nil {
 			return fmt.Errorf("failed to begin transaction: %w", err)
 		}
 
-		// Prepare insert statement
-		insertSQL, err := common.GenPreparedStmt(tableName, headers, common.InsertStmt)
-		if err != nil {
-			tx.Rollback()
-			return fmt.Errorf("failed to generate insert statement for table %s: %w", tableName, err)
-		}
-		stmt, err := tx.Prepare(insertSQL)
-		if err != nil {
-			tx.Rollback()
-			return fmt.Errorf("failed to prepare insert statement for table %s: %w", tableName, err)
-		}
+		// Use tx-specific statement
+		stmt := tx.Stmt(mainStmt)
 
 		// Prepare log statement if needed
 		var logStmt *sql.Stmt
 		if logErrors {
-			logStmt, err = tx.Prepare(`INSERT INTO _mksqlite_errors (message, table_name, row_data) VALUES (?, ?, ?)`)
-			if err != nil {
-				tx.Rollback()
-				return fmt.Errorf("failed to prepare log statement: %w", err)
-			}
+			logStmt = tx.Stmt(mainLogStmt)
 		}
 
 		rowCount := 0
@@ -217,17 +226,9 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 				if err != nil {
 					return fmt.Errorf("failed to begin transaction: %w", err)
 				}
-				stmt, err = tx.Prepare(insertSQL)
-				if err != nil {
-					tx.Rollback()
-					return fmt.Errorf("failed to prepare insert statement for table %s: %w", tableName, err)
-				}
+				stmt = tx.Stmt(mainStmt)
 				if logErrors {
-					logStmt, err = tx.Prepare(`INSERT INTO _mksqlite_errors (message, table_name, row_data) VALUES (?, ?, ?)`)
-					if err != nil {
-						tx.Rollback()
-						return fmt.Errorf("failed to prepare log statement: %w", err)
-					}
+					logStmt = tx.Stmt(mainLogStmt)
 				}
 			}
 			return nil
