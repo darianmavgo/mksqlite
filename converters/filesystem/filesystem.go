@@ -24,7 +24,14 @@ func init() {
 type filesystemDriver struct{}
 
 func (d *filesystemDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
-	return NewFilesystemConverter(source)
+	if config != nil && config.InputPath != "" {
+		return NewFilesystemConverter(config.InputPath)
+	}
+	// Fallback to trying to get the path from the source reader if it's a file
+	if f, ok := source.(*os.File); ok {
+		return NewFilesystemConverter(f.Name())
+	}
+	return nil, fmt.Errorf("FilesystemConverter requires InputPath in config or *os.File source")
 }
 
 // FilesystemConverter converts directory listings to SQLite tables
@@ -38,18 +45,11 @@ var _ common.RowProvider = (*FilesystemConverter)(nil)
 // Ensure FilesystemConverter implements StreamConverter
 var _ common.StreamConverter = (*FilesystemConverter)(nil)
 
-// NewFilesystemConverter creates a new FilesystemConverter from an io.Reader.
-// It requires the reader to be an *os.File to determine the directory path.
-func NewFilesystemConverter(r io.Reader) (*FilesystemConverter, error) {
-	file, ok := r.(*os.File)
-	if !ok {
-		return nil, fmt.Errorf("FilesystemConverter requires an *os.File reader to determine the directory path")
-	}
-
-	inputPath := file.Name()
-	info, err := file.Stat()
+// NewFilesystemConverter creates a new FilesystemConverter from a directory path.
+func NewFilesystemConverter(inputPath string) (*FilesystemConverter, error) {
+	info, err := os.Stat(inputPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat file: %w", err)
+		return nil, fmt.Errorf("failed to stat path: %w", err)
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("input path is not a directory: %s", inputPath)

@@ -43,14 +43,7 @@ func TestFilesystemConvertFile(t *testing.T) {
 		}
 	}
 
-	// Open the directory as a file
-	dirFile, err := os.Open(tempDir)
-	if err != nil {
-		t.Fatalf("failed to open directory: %v", err)
-	}
-	defer dirFile.Close()
-
-	converter, err := NewFilesystemConverter(dirFile)
+	converter, err := NewFilesystemConverter(tempDir)
 	if err != nil {
 		t.Fatalf("Failed to create Filesystem converter: %v", err)
 	}
@@ -115,14 +108,7 @@ func TestFilesystemConvertToSQL(t *testing.T) {
 		t.Fatalf("failed to create file: %v", err)
 	}
 
-	// Open the directory as a file (needed for the hack)
-	dirFile, err := os.Open(tempDir)
-	if err != nil {
-		t.Fatalf("failed to open temp dir: %v", err)
-	}
-	defer dirFile.Close()
-
-	converter, err := NewFilesystemConverter(dirFile)
+	converter, err := NewFilesystemConverter(tempDir)
 	if err != nil {
 		t.Fatalf("Failed to create Filesystem converter: %v", err)
 	}
