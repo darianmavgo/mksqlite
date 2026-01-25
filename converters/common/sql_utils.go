@@ -20,9 +20,17 @@ const (
 )
 
 var (
-	space = regexp.MustCompile(`\s+`)
-	reg   = regexp.MustCompile(`[^a-zA-Z0-9 _]+`)
+	space       = regexp.MustCompile(`\s+`)
+	reg         = regexp.MustCompile(`[^a-zA-Z0-9 _]+`)
+	keywordsMap map[string]struct{}
 )
+
+func init() {
+	keywordsMap = make(map[string]struct{}, len(KEYWORDS_LOWER))
+	for _, kw := range KEYWORDS_LOWER {
+		keywordsMap[kw] = struct{}{}
+	}
+}
 
 /*
 	GenCompliantNames generates names that can be used sqlite.
@@ -42,11 +50,8 @@ func GenCompliantNames(rawnames []string, prefix string) []string {
 		item = space.ReplaceAllString(item, "_")
 		item = strings.ToLower(item)
 		// remove keywords
-		for _, keyword := range KEYWORDS_LOWER {
-			if item == keyword {
-				item = fmt.Sprintf("%s%d", prefix, idx)
-				break
-			}
+		if _, ok := keywordsMap[item]; ok {
+			item = fmt.Sprintf("%s%d", prefix, idx)
 		}
 
 		// If stripping non-compliant chars leaves us with nothing, give it a default index name
