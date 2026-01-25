@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
@@ -26,6 +27,19 @@ func (d *csvDriver) Open(source io.Reader, config *common.ConversionConfig) (com
 }
 
 var emptyPadding = make([]string, 1024)
+
+type rowWrapper struct {
+	values []interface{}
+}
+
+// Pool for reusing rowWrapper structs to reduce allocations
+var rowWrapperPool = sync.Pool{
+	New: func() interface{} {
+		return &rowWrapper{
+			values: make([]interface{}, 0, 16),
+		}
+	},
+}
 
 // CSVConverter converts CSV files to SQLite tables
 type CSVConverter struct {
@@ -171,8 +185,9 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 	reader := c.csvReader
 
 	type rowOrError struct {
-		row []interface{}
-		err error
+		row     []interface{}
+		wrapper *rowWrapper
+		err     error
 	}
 
 	// Channel to pipeline reading and processing
@@ -185,11 +200,18 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 		// Send buffered rows first
 		for _, row := range c.bufferedRows {
 			row = padRow(row, len(c.headers))
-			interfaceRow := make([]interface{}, len(row))
-			for i, val := range row {
-				interfaceRow[i] = val
+
+			wrapper := rowWrapperPool.Get().(*rowWrapper)
+			if cap(wrapper.values) < len(row) {
+				wrapper.values = make([]interface{}, len(row))
+			} else {
+				wrapper.values = wrapper.values[:len(row)]
 			}
-			rowsCh <- rowOrError{row: interfaceRow}
+
+			for i, val := range row {
+				wrapper.values[i] = val
+			}
+			rowsCh <- rowOrError{row: wrapper.values, wrapper: wrapper}
 		}
 
 		for {
@@ -207,19 +229,28 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 			// Ensure row has the same number of columns as headers
 			row = padRow(row, len(c.headers))
 
-			// Convert to interface{}
-			interfaceRow := make([]interface{}, len(row))
-			for i, val := range row {
-				interfaceRow[i] = val
+			wrapper := rowWrapperPool.Get().(*rowWrapper)
+			if cap(wrapper.values) < len(row) {
+				wrapper.values = make([]interface{}, len(row))
+			} else {
+				wrapper.values = wrapper.values[:len(row)]
 			}
 
-			rowsCh <- rowOrError{row: interfaceRow}
+			for i, val := range row {
+				wrapper.values[i] = val
+			}
+
+			rowsCh <- rowOrError{row: wrapper.values, wrapper: wrapper}
 		}
 	}()
 
 	// Consumer (Main Thread)
 	for item := range rowsCh {
-		if err := yield(item.row, item.err); err != nil {
+		err := yield(item.row, item.err)
+		if item.wrapper != nil {
+			rowWrapperPool.Put(item.wrapper)
+		}
+		if err != nil {
 			return err
 		}
 	}
