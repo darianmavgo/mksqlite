@@ -54,6 +54,11 @@ func FileToSQLite(inputPath, outputPath string, config *common.ConversionConfig,
 	}
 	defer inputFile.Close()
 
+	if config == nil {
+		config = &common.ConversionConfig{}
+	}
+	config.InputPath = inputPath
+
 	converter, err := converters.Open(driverName, inputFile, config)
 	if err != nil {
 		return fmt.Errorf("failed to initialize converter: %w", err)
@@ -97,6 +102,11 @@ func exportToSQL(inputPath string, writer io.Writer, config *common.ConversionCo
 		return fmt.Errorf("failed to open input file: %w", err)
 	}
 	defer file.Close()
+
+	if config == nil {
+		config = &common.ConversionConfig{}
+	}
+	config.InputPath = inputPath
 
 	converter, err := converters.Open(driverName, file, config)
 	if err != nil {
