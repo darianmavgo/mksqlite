@@ -12,7 +12,7 @@ import (
 
 	"github.com/darianmavgo/mksqlite/converters"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 func TestCSVConvertFromURL(t *testing.T) {
@@ -61,7 +61,7 @@ func TestCSVConvertFromURL(t *testing.T) {
 	}
 
 	// Verify database content
-	db, err := sql.Open("sqlite3", outputPath)
+	db, err := sql.Open("sqlite", outputPath)
 	if err != nil {
 		t.Fatalf("Failed to open output database: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestCSVConvertFile(t *testing.T) {
 	t.Logf("CSV ConvertFile output: %s", outputPath)
 
 	// Verify the database was created and contains data
-	db, err := sql.Open("sqlite3", outputPath)
+	db, err := sql.Open("sqlite", outputPath)
 	if err != nil {
 		t.Fatalf("Failed to open output database: %v", err)
 	}

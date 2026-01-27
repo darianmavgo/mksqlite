@@ -10,7 +10,7 @@ import (
 
 	"github.com/darianmavgo/mksqlite/converters/common"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 var (
@@ -62,7 +62,7 @@ func ImportToSQLite(provider common.RowProvider, writer io.Writer, opts *ImportO
 	}
 
 	// Connect to SQLite database
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}

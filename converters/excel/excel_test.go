@@ -2,13 +2,14 @@ package excel
 
 import (
 	"database/sql"
-	"github.com/darianmavgo/mksqlite/converters"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/darianmavgo/mksqlite/converters"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestExcelConvertFile(t *testing.T) {
@@ -53,7 +54,7 @@ func TestExcelConvertFile(t *testing.T) {
 	t.Logf("Excel ConvertFile output: %s", outputPath)
 
 	// Verify the database was created and contains data
-	db, err := sql.Open("sqlite3", outputPath)
+	db, err := sql.Open("sqlite", outputPath)
 	if err != nil {
 		t.Fatalf("Failed to open output database: %v", err)
 	}

@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
-	"github.com/darianmavgo/mksqlite/converters"
-	"github.com/darianmavgo/mksqlite/converters/csv"
 	"os"
 	"path/filepath"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/csv"
+
+	_ "modernc.org/sqlite"
 )
 
 // FaultyReader simulates a stream that fails after reading a certain amount of data.
@@ -94,7 +95,7 @@ func TestStreamingInterruption(t *testing.T) {
 	}
 
 	// 5. Check DB Rows
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open DB: %v", err)
 	}

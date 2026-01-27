@@ -9,7 +9,7 @@ import (
 
 	"github.com/darianmavgo/mksqlite/converters"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 func TestFilesystemConvertFile(t *testing.T) {
@@ -61,7 +61,7 @@ func TestFilesystemConvertFile(t *testing.T) {
 	}
 
 	// Verify database content
-	db, err := sql.Open("sqlite3", outputPath)
+	db, err := sql.Open("sqlite", outputPath)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}

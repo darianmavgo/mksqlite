@@ -2,13 +2,14 @@ package json
 
 import (
 	"database/sql"
-	"github.com/darianmavgo/mksqlite/converters"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/darianmavgo/mksqlite/converters"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestJSONArray(t *testing.T) {
@@ -57,7 +58,7 @@ func TestJSONArray(t *testing.T) {
 		t.Fatalf("Import failed: %v", err)
 	}
 
-	db, err := sql.Open("sqlite3", outPath)
+	db, err := sql.Open("sqlite", outPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +139,7 @@ func TestJSONObject(t *testing.T) {
 		t.Fatalf("Import failed: %v", err)
 	}
 
-	db, err := sql.Open("sqlite3", outPath)
+	db, err := sql.Open("sqlite", outPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,7 @@ func TestJSONNested(t *testing.T) {
 	converters.ImportToSQLite(conv, f, nil)
 	f.Close()
 
-	db, _ := sql.Open("sqlite3", outPath)
+	db, _ := sql.Open("sqlite", outPath)
 	defer db.Close()
 
 	var meta string
@@ -232,11 +233,11 @@ func TestJSONPrimitiveFirst(t *testing.T) {
 		t.Fatalf("Failed to create converter: %v", err)
 	}
 
-    // Headers should be ["value"]
-    headers := conv.GetHeaders("jsontb0")
-    if len(headers) != 1 || headers[0] != "value" {
-        t.Errorf("Expected headers [value], got %v", headers)
-    }
+	// Headers should be ["value"]
+	headers := conv.GetHeaders("jsontb0")
+	if len(headers) != 1 || headers[0] != "value" {
+		t.Errorf("Expected headers [value], got %v", headers)
+	}
 
 	outputDir := "../../test_output/json_test"
 	os.MkdirAll(outputDir, 0755)
@@ -250,30 +251,38 @@ func TestJSONPrimitiveFirst(t *testing.T) {
 	err = converters.ImportToSQLite(conv, f, nil)
 	f.Close()
 
-    db, err := sql.Open("sqlite3", outPath)
+	db, err := sql.Open("sqlite", outPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 
 	rows, err := db.Query("SELECT value FROM jsontb0")
-    if err != nil { t.Fatal(err) }
-    defer rows.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
 
-    var val string
+	var val string
 
-    // Row 1: "first"
-    rows.Next()
-    rows.Scan(&val)
-    if val != "first" { t.Errorf("Row 1: expected 'first', got %s", val) }
+	// Row 1: "first"
+	rows.Next()
+	rows.Scan(&val)
+	if val != "first" {
+		t.Errorf("Row 1: expected 'first', got %s", val)
+	}
 
-    // Row 2: "second"
-    rows.Next()
-    rows.Scan(&val)
-    if val != "second" { t.Errorf("Row 2: expected 'second', got %s", val) }
+	// Row 2: "second"
+	rows.Next()
+	rows.Scan(&val)
+	if val != "second" {
+		t.Errorf("Row 2: expected 'second', got %s", val)
+	}
 
-    // Row 3: "[1,2]" (array)
-    rows.Next()
-    rows.Scan(&val)
-    if val != "[1,2]" { t.Errorf("Row 3: expected '[1,2]', got '%s'", val) }
+	// Row 3: "[1,2]" (array)
+	rows.Next()
+	rows.Scan(&val)
+	if val != "[1,2]" {
+		t.Errorf("Row 3: expected '[1,2]', got '%s'", val)
+	}
 }

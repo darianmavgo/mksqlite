@@ -2,13 +2,14 @@ package txt
 
 import (
 	"database/sql"
-	"github.com/darianmavgo/mksqlite/converters"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/darianmavgo/mksqlite/converters"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestTxtConverter_LargeFile(t *testing.T) {
@@ -56,7 +57,7 @@ func TestTxtConverter_LargeFile(t *testing.T) {
 	}
 
 	// Verify DB content
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}

@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"github.com/darianmavgo/mksqlite/converters/common"
 	"os"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/darianmavgo/mksqlite/converters/common"
+
+	_ "modernc.org/sqlite"
 )
 
 // MockProvider implements common.RowProvider for testing
@@ -93,7 +94,7 @@ func TestImportToSQLiteWriter(t *testing.T) {
 	tmpFile.Close()
 
 	// Open the verification DB
-	db, err := sql.Open("sqlite3", outputPath)
+	db, err := sql.Open("sqlite", outputPath)
 	if err != nil {
 		t.Fatalf("Failed to open verification DB: %v", err)
 	}
@@ -179,7 +180,7 @@ func TestImportToSQLiteWithLogging(t *testing.T) {
 	}
 
 	// Verify DB content
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("Failed to open DB: %v", err)
 	}
