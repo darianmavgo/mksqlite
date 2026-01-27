@@ -82,7 +82,8 @@ func TestImportToSQLiteWriter(t *testing.T) {
 	}
 
 	// Verify content by writing to a persistent file and opening it
-	outputPath := "../sample_out/writer_verify.db"
+	outputPath := "test_output/writer_verify.db"
+	os.MkdirAll("test_output", 0755)
 	tmpFile, err := os.Create(outputPath)
 	if err != nil {
 		t.Fatalf("Failed to create verification file: %v", err)
