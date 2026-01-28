@@ -67,7 +67,7 @@ func TestFilesystemConvertFile(t *testing.T) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query("SELECT path, name, size, is_dir FROM tb0 ORDER BY path")
+	rows, err := db.Query("SELECT path, name, size, is_dir, mime_type, create_time, permissions FROM tb0 ORDER BY path")
 	if err != nil {
 		t.Fatalf("failed to query db: %v", err)
 	}
@@ -75,13 +75,25 @@ func TestFilesystemConvertFile(t *testing.T) {
 
 	var count int
 	for rows.Next() {
-		var path, name string
+		var path, name, mimeType, createTime, permissions string
 		var size int64
 		var isDir int
-		if err := rows.Scan(&path, &name, &size, &isDir); err != nil {
+		if err := rows.Scan(&path, &name, &size, &isDir, &mimeType, &createTime, &permissions); err != nil {
 			t.Fatalf("failed to scan row: %v", err)
 		}
-		t.Logf("Found: path=%s, name=%s, size=%d, isDir=%d", path, name, size, isDir)
+		t.Logf("Found: path=%s, name=%s, size=%d, isDir=%d, mime=%s, created=%s, perms=%s",
+			path, name, size, isDir, mimeType, createTime, permissions)
+
+		if name == "file1.txt" {
+			if !strings.Contains(mimeType, "text/plain") {
+				t.Errorf("Expected file1.txt to have text/plain mime type, got %s", mimeType)
+			}
+		}
+
+		if createTime == "" {
+			t.Errorf("create_time is empty for %s", path)
+		}
+
 		count++
 	}
 

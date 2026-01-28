@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,7 +69,11 @@ func (c *FilesystemConverter) GetTableNames() []string {
 // GetHeaders implements RowProvider
 func (c *FilesystemConverter) GetHeaders(tableName string) []string {
 	if tableName == FSTB {
-		return []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
+		return []string{
+			"path", "name", "size", "extension",
+			"mod_time", "create_time", "permissions",
+			"is_dir", "mime_type",
+		}
 	}
 	return nil
 }
@@ -98,15 +103,27 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 
 		size := info.Size()
 		modTime := info.ModTime().Format(time.RFC3339)
+		createTime := getCreateTime(info).Format(time.RFC3339)
+		permissions := info.Mode().String()
+
 		isDir := 0
+		mimeType := ""
+
 		if d.IsDir() {
 			isDir = 1
+			mimeType = "inode/directory"
+		} else {
+			// Detect mimetype
+			mimeType = c.detectMimeType(path)
 		}
+
 		ext := filepath.Ext(path)
 		name := d.Name()
 
 		row := []interface{}{
-			relPath, name, size, ext, modTime, isDir,
+			relPath, name, size, ext,
+			modTime, createTime, permissions,
+			isDir, mimeType,
 		}
 
 		return yield(row, nil)
@@ -119,6 +136,21 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 	return nil
 }
 
+func (c *FilesystemConverter) detectMimeType(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return "application/octet-stream"
+	}
+	defer f.Close()
+
+	buffer := make([]byte, 512)
+	n, err := f.Read(buffer)
+	if err != nil && err != io.EOF {
+		return "application/octet-stream"
+	}
+	return http.DetectContentType(buffer[:n])
+}
+
 // ConvertToSQL implements StreamConverter for filesystem directories
 func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
 	// We need the path to walk the directory.
@@ -129,7 +161,11 @@ func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
 	}
 
 	inputPath := c.inputPath
-	headers := []string{"path", "name", "size", "extension", "mod_time", "is_dir"}
+	headers := []string{
+		"path", "name", "size", "extension",
+		"mod_time", "create_time", "permissions",
+		"is_dir", "mime_type",
+	}
 
 	// Write CREATE TABLE statement
 	createTableSQL := common.GenCreateTableSQL(FSTB, headers)
@@ -156,10 +192,19 @@ func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
 
 		size := info.Size()
 		modTime := info.ModTime().Format(time.RFC3339)
+		createTime := getCreateTime(info).Format(time.RFC3339)
+		permissions := info.Mode().String()
+
 		isDir := 0
+		mimeType := ""
+
 		if d.IsDir() {
 			isDir = 1
+			mimeType = "inode/directory"
+		} else {
+			mimeType = c.detectMimeType(path)
 		}
+
 		ext := filepath.Ext(path)
 		name := d.Name()
 
@@ -170,10 +215,13 @@ func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
 			fmt.Sprintf("%d", size),
 			ext,
 			modTime,
+			createTime,
+			permissions,
 			fmt.Sprintf("%d", isDir),
+			mimeType,
 		}
 
-		if _, err := fmt.Fprintf(writer, "INSERT INTO %s (path, name, size, extension, mod_time, is_dir) VALUES (", FSTB); err != nil {
+		if _, err := fmt.Fprintf(writer, "INSERT INTO %s (path, name, size, extension, mod_time, create_time, permissions, is_dir, mime_type) VALUES (", FSTB); err != nil {
 			return fmt.Errorf("failed to write INSERT start: %w", err)
 		}
 
