@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/hashicorp/hcl/v2 v2.24.0
+	github.com/magefile/mage v1.15.0
 	github.com/xuri/excelize/v2 v2.10.0
 	github.com/zclconf/go-cty v1.17.0
 	golang.org/x/net v0.49.0
