@@ -3,15 +3,20 @@ package converters
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/darianmavgo/mksqlite/converters/common"
 
 	_ "modernc.org/sqlite"
 )
+
+var ErrInterrupted = errors.New("operation interrupted by user")
 
 var (
 	// BatchSize defines the number of rows to insert before committing a transaction.
@@ -174,8 +179,20 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 
 		rowCount := 0
 
+		// Setup signal handling for this table's processing
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigChan)
+
 		// Insert rows using streaming ScanRows
 		err = provider.ScanRows(tableName, func(row []interface{}, rowErr error) error {
+			// Check for interruption non-blocking
+			select {
+			case <-sigChan:
+				return ErrInterrupted
+			default:
+			}
+
 			if rowErr != nil {
 				if logErrors {
 					// Log provider error
@@ -240,6 +257,16 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 		}
 
 		if err != nil {
+			if errors.Is(err, ErrInterrupted) {
+				if opts != nil && opts.Verbose {
+					log.Printf("[MKSQLITE] Interrupted! Committing partial transaction for table %s...", tableName)
+				}
+				// Commit what we have
+				if commitErr := tx.Commit(); commitErr != nil {
+					log.Printf("[MKSQLITE] Failed to commit on interrupt: %v", commitErr)
+				}
+				return err
+			}
 			tx.Rollback()
 			return fmt.Errorf("failed to scan rows for table %s: %w", tableName, err)
 		}

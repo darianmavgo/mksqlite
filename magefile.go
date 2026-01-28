@@ -19,6 +19,13 @@ func Build() error {
 	return sh.Run("go", "build", "-o", "./bin", "./...")
 }
 
+// Install copies the mksqlite binary to /usr/local/bin.
+func Install() error {
+	mg.Deps(Build)
+	fmt.Println("Installing...")
+	return sh.Run("cp", "bin/mksqlite", "/usr/local/bin/mksqlite")
+}
+
 // Test runs all tests in the project with verbose output.
 func Test() error {
 	fmt.Println("Running Tests...")
