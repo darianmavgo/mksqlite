@@ -4,9 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"strings"
+
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
-	"strings"
 )
 
 const (
@@ -53,7 +54,7 @@ func NewTxtConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*T
 	}
 
 	return &TxtConverter{
-		scanner: bufio.NewScanner(r),
+		scanner: bufio.NewScanner(bufio.NewReaderSize(r, 65536)),
 		Config:  *config,
 	}, nil
 }

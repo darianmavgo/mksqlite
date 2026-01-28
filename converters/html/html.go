@@ -1,11 +1,13 @@
 package html
 
 import (
+	"bufio"
 	"fmt"
 	"io"
+	"strings"
+
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
-	"strings"
 
 	"golang.org/x/net/html"
 )
@@ -40,7 +42,7 @@ var _ common.StreamConverter = (*HTMLConverter)(nil)
 
 // NewHTMLConverter creates a new HTMLConverter from an io.Reader
 func NewHTMLConverter(r io.Reader) (*HTMLConverter, error) {
-	tables, err := parseHTML(r)
+	tables, err := parseHTML(bufio.NewReaderSize(r, 65536))
 	if err != nil {
 		return nil, err
 	}

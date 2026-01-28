@@ -74,7 +74,7 @@ func NewCSVConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*C
 		config.TableName = CSVTB
 	}
 
-	br := bufio.NewReader(r)
+	br := bufio.NewReaderSize(r, 65536)
 
 	// Detect delimiter if not set
 	if config.Delimiter == 0 {

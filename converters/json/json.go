@@ -1,14 +1,16 @@
 package json
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
-	"github.com/darianmavgo/mksqlite/converters"
-	"github.com/darianmavgo/mksqlite/converters/common"
 	"sort"
 	"strings"
+
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/common"
 )
 
 func init() {
@@ -55,7 +57,7 @@ var _ common.StreamConverter = (*JSONConverter)(nil)
 func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
 	seeker, isSeeker := r.(io.ReadSeeker)
 
-	dec := json.NewDecoder(r)
+	dec := json.NewDecoder(bufio.NewReaderSize(r, 65536))
 
 	// Peek the first token to determine structure
 	token, err := dec.Token()

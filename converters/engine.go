@@ -72,6 +72,11 @@ func ImportToSQLite(provider common.RowProvider, writer io.Writer, opts *ImportO
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// Set PRAGMA page_size and cache_size for performance
+	if _, err := db.Exec("PRAGMA page_size = 65536; PRAGMA cache_size = -2000;"); err != nil {
+		return fmt.Errorf("failed to set PRAGMAs: %w", err)
+	}
+
 	// Populate database
 	if opts != nil && opts.Verbose {
 		log.Printf("[MKSQLITE] Starting database population...")

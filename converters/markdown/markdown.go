@@ -187,7 +187,7 @@ var (
 )
 
 func parseMarkdown(r io.Reader) ([]tableData, error) {
-	scanner := bufio.NewScanner(r)
+	scanner := bufio.NewScanner(bufio.NewReaderSize(r, 65536))
 	var tables []tableData
 	var currentName string
 	var lines []string
