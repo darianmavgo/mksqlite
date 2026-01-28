@@ -131,19 +131,31 @@ func main() {
 	logMode := false
 
 	// Filter out --log flag
+	// Parse flags manually for simplicity
 	var cleanArgs []string
-	for _, arg := range args {
-		if arg == "--log" {
+	var resumePath string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--log":
 			logMode = true
-		} else {
+		case arg == "--resume-path":
+			if i+1 < len(args) {
+				resumePath = args[i+1]
+				i++ // Skip value
+			} else {
+				fmt.Println("Error: --resume-path requires a value")
+				os.Exit(1)
+			}
+		default:
 			cleanArgs = append(cleanArgs, arg)
 		}
 	}
 
 	if len(cleanArgs) < 1 {
 		fmt.Println("Usage:")
-		fmt.Println("  mksqlite [--log] <input_file> [output_db]          # Convert to SQLite database")
-		fmt.Println("  mksqlite --sql <input_file> [output_file]          # Export as SQL statements")
+		fmt.Println("  mksqlite [--log] [--resume-path <path>] <input_file> [output_db] # Convert to SQLite database")
+		fmt.Println("  mksqlite --sql <input_file> [output_file]                          # Export as SQL statements")
 		os.Exit(1)
 	}
 
@@ -182,7 +194,11 @@ func main() {
 			outputPath = inputPath + ".db"
 		}
 
-		err := FileToSQLite(inputPath, outputPath, nil, &converters.ImportOptions{LogErrors: logMode})
+		config := &common.ConversionConfig{
+			ResumePath: resumePath,
+		}
+
+		err := FileToSQLite(inputPath, outputPath, config, &converters.ImportOptions{LogErrors: logMode})
 		if err != nil {
 			fmt.Printf("Error converting file: %v\n", err)
 			os.Exit(1)
