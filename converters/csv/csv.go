@@ -260,10 +260,14 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 
 // ConvertToSQL implements StreamConverter for CSV files (outputs SQL to writer).
 // It uses concurrency to pipeline reading and writing.
-func (c *CSVConverter) ConvertToSQL(writer io.Writer) error {
+func (c *CSVConverter) ConvertToSQL(w io.Writer) error {
 	if c.csvReader == nil {
 		return fmt.Errorf("CSV reader is not initialized")
 	}
+
+	// Use buffered writer to reduce system calls
+	writer := bufio.NewWriter(w)
+	defer writer.Flush()
 
 	// Write CREATE TABLE statement
 	createTableSQL := common.GenCreateTableSQL(c.Config.TableName, c.headers)
@@ -368,6 +372,6 @@ func (c *CSVConverter) ConvertToSQL(writer io.Writer) error {
 	case err := <-errCh:
 		return err
 	default:
-		return nil
+		return writer.Flush()
 	}
 }
