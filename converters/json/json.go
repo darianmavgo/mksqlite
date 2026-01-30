@@ -416,10 +416,11 @@ func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []int
 
 // ConvertToSQL implements StreamConverter
 func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
+	bw := bufio.NewWriter(writer)
 	for _, tableName := range c.GetTableNames() {
 		headers := c.GetHeaders(tableName)
 		createSQL := common.GenCreateTableSQL(tableName, headers)
-		if _, err := fmt.Fprintf(writer, "%s;\n\n", createSQL); err != nil {
+		if _, err := fmt.Fprintf(bw, "%s;\n\n", createSQL); err != nil {
 			return err
 		}
 
@@ -427,48 +428,48 @@ func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
 			if err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", tableName); err != nil {
+			if _, err := fmt.Fprintf(bw, "INSERT INTO %s (", tableName); err != nil {
 				return err
 			}
 			// columns
 			for i, h := range headers {
 				if i > 0 {
-					if _, err := fmt.Fprint(writer, ", "); err != nil {
+					if _, err := fmt.Fprint(bw, ", "); err != nil {
 						return err
 					}
 				}
-				if _, err := fmt.Fprint(writer, h); err != nil {
+				if _, err := fmt.Fprint(bw, h); err != nil {
 					return err
 				}
 			}
-			if _, err := fmt.Fprint(writer, ") VALUES ("); err != nil {
+			if _, err := fmt.Fprint(bw, ") VALUES ("); err != nil {
 				return err
 			}
 			// values
 			for i, val := range row {
 				if i > 0 {
-					if _, err := fmt.Fprint(writer, ", "); err != nil {
+					if _, err := fmt.Fprint(bw, ", "); err != nil {
 						return err
 					}
 				}
 				// handle types
 				switch v := val.(type) {
 				case nil:
-					if _, err := fmt.Fprint(writer, "NULL"); err != nil {
+					if _, err := fmt.Fprint(bw, "NULL"); err != nil {
 						return err
 					}
 				case string:
 					escaped := strings.ReplaceAll(v, "'", "''")
-					if _, err := fmt.Fprintf(writer, "'%s'", escaped); err != nil {
+					if _, err := fmt.Fprintf(bw, "'%s'", escaped); err != nil {
 						return err
 					}
 				default:
-					if _, err := fmt.Fprintf(writer, "'%v'", v); err != nil {
+					if _, err := fmt.Fprintf(bw, "'%v'", v); err != nil {
 						return err
 					}
 				}
 			}
-			if _, err := fmt.Fprint(writer, ");\n"); err != nil {
+			if _, err := fmt.Fprint(bw, ");\n"); err != nil {
 				return err
 			}
 			return nil
@@ -476,9 +477,9 @@ func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if _, err := fmt.Fprint(writer, "\n"); err != nil {
+		if _, err := fmt.Fprint(bw, "\n"); err != nil {
 			return err
 		}
 	}
-	return nil
+	return bw.Flush()
 }
