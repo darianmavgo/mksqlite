@@ -1,6 +1,7 @@
 package txt
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ func TestTxtTimeout(t *testing.T) {
 		t.Fatalf("Failed to create converter: %v", err)
 	}
 
-	err = c.ScanRows("timeout_test", func(row []interface{}, err error) error {
+	err = c.ScanRows(context.Background(), "timeout_test", func(row []interface{}, err error) error {
 		return nil
 	})
 

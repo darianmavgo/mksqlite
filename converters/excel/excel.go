@@ -1,6 +1,7 @@
 package excel
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -194,7 +195,7 @@ func (e *ExcelConverter) GetColumnTypes(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (e *ExcelConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	sheetName, ok := e.sheetMap[tableName]
 	if !ok {
 		return nil // Should not happen if GetTableNames is correct
@@ -232,6 +233,13 @@ func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}, er
 		if err := yield(interfaceRow, nil); err != nil {
 			return err
 		}
+
+		// Check cancel
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 
 	return nil
@@ -246,7 +254,7 @@ func (e *ExcelConverter) Close() error {
 }
 
 // ConvertToSQL implements StreamConverter for Excel files (outputs SQL to writer)
-func (e *ExcelConverter) ConvertToSQL(writer io.Writer) error {
+func (e *ExcelConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	if e.file == nil {
 		return fmt.Errorf("ExcelConverter not initialized")
 	}
@@ -266,7 +274,7 @@ func (e *ExcelConverter) ConvertToSQL(writer io.Writer) error {
 			return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 		}
 
-		err := e.ScanRows(tableName, func(row []interface{}, err error) error {
+		err := e.ScanRows(ctx, tableName, func(row []interface{}, err error) error {
 			if err != nil {
 				return err
 			}

@@ -1,6 +1,7 @@
 package json
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -206,7 +207,7 @@ func TestJSONConvertToSQL(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	err = conv.ConvertToSQL(&buf)
+	err = conv.ConvertToSQL(context.Background(), &buf)
 	if err != nil {
 		t.Fatal(err)
 	}

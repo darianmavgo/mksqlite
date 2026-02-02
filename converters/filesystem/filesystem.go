@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -121,7 +122,7 @@ func (c *FilesystemConverter) GetColumnTypes(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	if tableName != FSTB {
 		return nil
 	}
@@ -136,8 +137,40 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 	// results channel carries the data rows or errors
 	results := make(chan []interface{}, 10000)
 
-	// Cancellation mechanism
+	// Cancellation mechanism: combine ctx and internal timeout
 	doneCh := make(chan struct{})
+
+	// Handle context cancellation
+	go func() {
+		// Wait for context cancel OR doneCh closed by internal logic
+		select {
+		case <-ctx.Done():
+			// External cancel
+			select {
+			case <-doneCh:
+			default:
+				close(doneCh)
+			}
+		case <-doneCh:
+			// Internal cancel/finish
+		}
+	}()
+
+	// Handle context cancellation
+	go func() {
+		// Wait for context cancel OR doneCh closed by internal logic
+		select {
+		case <-ctx.Done():
+			// External cancel
+			select {
+			case <-doneCh:
+			default:
+				close(doneCh)
+			}
+		case <-doneCh:
+			// Internal cancel/finish
+		}
+	}()
 
 	if c.timeout > 0 {
 		log.Printf("Filesystem scan idle timeout set to %v", c.timeout)
@@ -180,7 +213,13 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 			select {
 			case row, ok := <-results:
 				if !ok {
-					consumerDone <- nil
+					// Check if we were cancelled
+					select {
+					case <-ctx.Done():
+						consumerDone <- ctx.Err()
+					default:
+						consumerDone <- nil
+					}
 					return
 				}
 
@@ -198,13 +237,16 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 				}
 			case <-wdDone:
 				// Watchdog fired.
-				// The goroutine above handles closing doneCh.
-				// We just need to exit.
 				consumerDone <- converters.ErrScanTimeout
 				return
 			case <-doneCh:
-				// Externally cancelled
-				consumerDone <- converters.ErrScanTimeout
+				// This could be context cancellation or watchdog
+				select {
+				case <-ctx.Done():
+					consumerDone <- ctx.Err()
+				default:
+					consumerDone <- converters.ErrScanTimeout
+				}
 				return
 			}
 		}
@@ -462,7 +504,7 @@ func (c *FilesystemConverter) detectMimeType(path string) string {
 }
 
 // ConvertToSQL implements StreamConverter for filesystem directories
-func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
+func (c *FilesystemConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	// We need the path to walk the directory.
 	// It is stored in c.inputPath
 
@@ -486,6 +528,12 @@ func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
 
 	// Walk directory
 	err := filepath.WalkDir(inputPath, func(path string, d fs.DirEntry, err error) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if err != nil {
 			return err
 		}

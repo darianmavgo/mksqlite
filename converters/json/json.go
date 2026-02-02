@@ -3,6 +3,7 @@ package json
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -330,7 +331,7 @@ func (c *JSONConverter) GetColumnTypes(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (c *JSONConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	info, ok := c.tables[tableName]
 	if !ok {
 		return nil
@@ -457,6 +458,8 @@ func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}, err
 				}
 			case <-wdDone:
 				return converters.ErrScanTimeout
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 		}
 	}
@@ -616,7 +619,7 @@ func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []int
 }
 
 // ConvertToSQL implements StreamConverter
-func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
+func (c *JSONConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	for _, tableName := range c.GetTableNames() {
 		headers := c.GetHeaders(tableName)
 		colTypes := c.GetColumnTypes(tableName)
@@ -626,7 +629,7 @@ func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
 			return err
 		}
 
-		err := c.ScanRows(tableName, func(row []interface{}, err error) error {
+		err := c.ScanRows(ctx, tableName, func(row []interface{}, err error) error {
 			if err != nil {
 				return err
 			}

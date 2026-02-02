@@ -2,6 +2,7 @@ package txt
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -92,7 +93,7 @@ func (c *TxtConverter) GetColumnTypes(tableName string) []string {
 }
 
 // ScanRows implements RowProvider using a worker pattern (pipelining) to improve streaming performance.
-func (c *TxtConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (c *TxtConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	if tableName != c.Config.TableName {
 		return nil
 	}
@@ -162,12 +163,14 @@ func (c *TxtConverter) ScanRows(tableName string, yield func([]interface{}, erro
 			}
 		case <-wdDone:
 			return converters.ErrScanTimeout
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }
 
 // ConvertToSQL implements StreamConverter for Txt files (outputs SQL to writer).
-func (c *TxtConverter) ConvertToSQL(writer io.Writer) error {
+func (c *TxtConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	if c.scanner == nil {
 		return fmt.Errorf("Txt scanner is not initialized")
 	}
@@ -180,6 +183,12 @@ func (c *TxtConverter) ConvertToSQL(writer io.Writer) error {
 	}
 
 	for c.scanner.Scan() {
+		// Check context
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		line := c.scanner.Text()
 
 		if _, err := fmt.Fprintf(writer, "INSERT INTO %s (content) VALUES (", c.Config.TableName); err != nil {

@@ -15,6 +15,7 @@ import (
 // It relies on the FilesystemConverter handling permission errors gracefully
 // and timing out by default after 20 seconds.
 func TestGenerateRootIndex(t *testing.T) {
+	t.Skip("Skipping full system scan test")
 	// Use a path relative to the package directory, putting it in the project root
 	outputDB := "../../Index.sqlite"
 

@@ -2,6 +2,7 @@ package zip
 
 import (
 	"archive/zip"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -222,7 +223,7 @@ func (z *ZipConverter) GetColumnTypes(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (z *ZipConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	if tableName != "file_list" {
 		return nil
 	}
@@ -248,12 +249,18 @@ func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}, erro
 		if err := yield(values, nil); err != nil {
 			return err
 		}
+		// Check cancel
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 	return nil
 }
 
 // ConvertToSQL implements StreamConverter for ZIP files
-func (z *ZipConverter) ConvertToSQL(writer io.Writer) error {
+func (z *ZipConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	// Write CREATE TABLE
 	tableName := "file_list"
 	headers := z.GetHeaders(tableName)
@@ -316,6 +323,12 @@ func (z *ZipConverter) ConvertToSQL(writer io.Writer) error {
 
 		if _, err := writer.Write([]byte(");\n")); err != nil {
 			return fmt.Errorf("failed to write statement end: %w", err)
+		}
+		// Check cancel
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
 	}
 

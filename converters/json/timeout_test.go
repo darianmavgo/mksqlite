@@ -1,6 +1,7 @@
 package json
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestJSONTimeout(t *testing.T) {
 	}
 
 	// Should fail during ScanRows
-	err = c.ScanRows("jsontb0", func(row []interface{}, err error) error {
+	err = c.ScanRows(context.Background(), "jsontb0", func(row []interface{}, err error) error {
 		return nil
 	})
 

@@ -1,6 +1,7 @@
 package csv
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -10,10 +11,16 @@ import (
 )
 
 type blockingReader struct {
-	delay time.Duration
+	delay      time.Duration
+	headerSent bool
 }
 
 func (r *blockingReader) Read(p []byte) (n int, err error) {
+	if !r.headerSent {
+		n = copy(p, []byte("col1,col2\n"))
+		r.headerSent = true
+		return n, nil
+	}
 	time.Sleep(r.delay)
 	return 0, nil
 }
@@ -32,7 +39,7 @@ func TestCSVTimeout(t *testing.T) {
 		t.Fatalf("Failed to create converter: %v", err)
 	}
 
-	err = c.ScanRows("timeout_test", func(row []interface{}, err error) error {
+	err = c.ScanRows(context.Background(), "timeout_test", func(row []interface{}, err error) error {
 		return nil
 	})
 

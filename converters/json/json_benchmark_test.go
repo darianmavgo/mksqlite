@@ -1,6 +1,7 @@
 package json
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ func BenchmarkJSONScanRows(b *testing.B) {
 			b.Fatalf("NewJSONConverter failed: %v", err)
 		}
 
-		err = conv.ScanRows("jsontb0", func(row []interface{}, err error) error {
+		err = conv.ScanRows(context.Background(), "jsontb0", func(row []interface{}, err error) error {
 			return nil
 		})
 		if err != nil {
