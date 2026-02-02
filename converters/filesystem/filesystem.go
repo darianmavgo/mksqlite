@@ -138,9 +138,8 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 
 	// Cancellation mechanism
 	doneCh := make(chan struct{})
-	var idleTimeout time.Duration
+
 	if c.timeout > 0 {
-		idleTimeout = c.timeout
 		log.Printf("Filesystem scan idle timeout set to %v", c.timeout)
 	}
 
@@ -153,17 +152,31 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 	go func() {
 		defer close(consumerDone)
 
-		var timer *time.Timer
-		var timerCh <-chan time.Time
+		wd := common.NewWatchdog(c.timeout)
+		// Monitoring starts, will close doneCh if timeout reached
+		wdDone := wd.Start()
 
-		if idleTimeout > 0 {
-			timer = time.NewTimer(idleTimeout)
-			timerCh = timer.C
-			defer timer.Stop()
-		}
+		// If watchdog fires, we need to signal cancellation to the rest of the system
+		go func() {
+			select {
+			case <-wdDone:
+				log.Printf("Scan halted due to inactivity timeout (%v) after %d files.", c.timeout, rowCount)
+				// Close the main doneCh to signal workers to stop
+				// Check if already closed to avoid panic
+				select {
+				case <-doneCh:
+				default:
+					close(doneCh)
+				}
+			case <-doneCh:
+				// Main doneCh closed elsewhere (e.g. completion), stop watchdog
+				wd.Stop()
+			}
+		}()
+
+		defer wd.Stop()
 
 		for {
-
 			select {
 			case row, ok := <-results:
 				if !ok {
@@ -172,15 +185,7 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 				}
 
 				// Reset idle timer
-				if timer != nil {
-					if !timer.Stop() {
-						select {
-						case <-timer.C:
-						default:
-						}
-					}
-					timer.Reset(idleTimeout)
-				}
+				wd.Kick()
 
 				rowCount++
 				if time.Since(lastLog) > 2*time.Second {
@@ -191,15 +196,14 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 					consumerDone <- err
 					return
 				}
-			case <-timerCh:
-				// Timed out due to inactivity
-				log.Printf("Scan halted due to inactivity timeout (%v) after %d files.", idleTimeout, rowCount)
-				close(doneCh) // Signal cancellation to workers
+			case <-wdDone:
+				// Watchdog fired.
+				// The goroutine above handles closing doneCh.
+				// We just need to exit.
 				consumerDone <- converters.ErrScanTimeout
 				return
 			case <-doneCh:
-				// Externally cancelled (should not happen if we are the ones cancelling via timer,
-				// but defensive in case we add other cancellation triggers)
+				// Externally cancelled
 				consumerDone <- converters.ErrScanTimeout
 				return
 			}

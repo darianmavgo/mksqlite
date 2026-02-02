@@ -20,7 +20,7 @@ func init() {
 type zipDriver struct{}
 
 func (d *zipDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
-	return NewZipConverter(source)
+	return NewZipConverterWithConfig(source, config)
 }
 
 // SizableReaderAt interface for inputs that support random access and size query
@@ -55,9 +55,39 @@ func (z *ZipConverter) Close() error {
 
 // NewZipConverter creates a new ZipConverter from an io.Reader
 func NewZipConverter(r io.Reader) (*ZipConverter, error) {
+	return NewZipConverterWithConfig(r, nil)
+}
+
+// progressReader wraps a Reader to kick a watchdog on successful reads
+type progressReader struct {
+	r  io.Reader
+	fn func()
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 && p.fn != nil {
+		p.fn()
+	}
+	return n, err
+}
+
+// NewZipConverterWithConfig creates a new ZipConverter with config
+func NewZipConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*ZipConverter, error) {
 	var files []FastZipEntry
 	var tempFile *os.File
 	var err error
+
+	if config == nil {
+		config = &common.ConversionConfig{}
+	}
+
+	var timeout time.Duration
+	if config.ScanTimeout != "" {
+		if d, err := time.ParseDuration(config.ScanTimeout); err == nil {
+			timeout = d
+		}
+	}
 
 	// Check if input supports ReaderAt and Size (Fast Path)
 	// 1. *os.File
@@ -96,9 +126,33 @@ func NewZipConverter(r io.Reader) (*ZipConverter, error) {
 			os.Remove(tempFile.Name())
 		}
 
-		if _, err := io.Copy(tempFile, r); err != nil {
-			cleanup()
-			return nil, fmt.Errorf("failed to copy stream to temp file: %w", err)
+		// Copy with timeout support
+		wd := common.NewWatchdog(timeout)
+		done := wd.Start()
+		defer wd.Stop()
+
+		pr := &progressReader{r: r, fn: wd.Kick}
+
+		type copyRes struct {
+			n   int64
+			err error
+		}
+		ch := make(chan copyRes, 1)
+
+		go func() {
+			n, err := io.Copy(tempFile, pr)
+			ch <- copyRes{n, err}
+		}()
+
+		select {
+		case res := <-ch:
+			if res.err != nil {
+				cleanup()
+				return nil, fmt.Errorf("failed to copy stream to temp file: %w", res.err)
+			}
+		case <-done:
+			cleanup() // Delete temp file
+			return nil, converters.ErrScanTimeout
 		}
 
 		info, err := tempFile.Stat()

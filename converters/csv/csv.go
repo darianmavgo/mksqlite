@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
@@ -47,6 +48,7 @@ type CSVConverter struct {
 	bufferedRows [][]string
 	csvReader    *csv.Reader
 	Config       common.ConversionConfig
+	timeout      time.Duration
 }
 
 // Ensure CSVConverter implements RowProvider
@@ -136,11 +138,19 @@ func NewCSVConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*C
 	// Sanitize headers
 	sanitizedHeaders := common.GenColumnNames(headers)
 
+	var timeout time.Duration
+	if config.ScanTimeout != "" {
+		if d, err := time.ParseDuration(config.ScanTimeout); err == nil {
+			timeout = d
+		}
+	}
+
 	return &CSVConverter{
 		headers:      sanitizedHeaders,
 		bufferedRows: bufferedRows,
 		csvReader:    reader,
 		Config:       *config,
+		timeout:      timeout,
 	}, nil
 }
 
@@ -201,10 +211,22 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 
 	// Channel to pipeline reading and processing
 	rowsCh := make(chan rowOrError, 100)
+	// Channel to signal cancellation to producer
+	cancelCh := make(chan struct{})
 
 	// Producer goroutine
 	go func() {
 		defer close(rowsCh)
+
+		// Helper to safely send
+		send := func(item rowOrError) bool {
+			select {
+			case rowsCh <- item:
+				return true
+			case <-cancelCh:
+				return false
+			}
+		}
 
 		// Send buffered rows first
 		for _, row := range c.bufferedRows {
@@ -220,7 +242,9 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 			for i, val := range row {
 				wrapper.values[i] = val
 			}
-			rowsCh <- rowOrError{row: wrapper.values, wrapper: wrapper}
+			if !send(rowOrError{row: wrapper.values, wrapper: wrapper}) {
+				return
+			}
 		}
 
 		for {
@@ -230,9 +254,10 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 					break
 				}
 				// Send error to consumer
-				rowsCh <- rowOrError{err: fmt.Errorf("failed to read CSV row: %w", err)}
-				// Continue reading next row
-				continue
+				send(rowOrError{err: fmt.Errorf("failed to read CSV row: %w", err)})
+				// Continue reading next row ?? Usually error is fatal or we stop.
+				// For CSV, Read() error usually stops.
+				return
 			}
 
 			// Ensure row has the same number of columns as headers
@@ -249,22 +274,40 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 				wrapper.values[i] = val
 			}
 
-			rowsCh <- rowOrError{row: wrapper.values, wrapper: wrapper}
+			if !send(rowOrError{row: wrapper.values, wrapper: wrapper}) {
+				return
+			}
 		}
 	}()
 
 	// Consumer (Main Thread)
-	for item := range rowsCh {
-		err := yield(item.row, item.err)
-		if item.wrapper != nil {
-			rowWrapperPool.Put(item.wrapper)
-		}
-		if err != nil {
-			return err
+	// Signal cancellation when we exit
+	defer close(cancelCh)
+
+	wd := common.NewWatchdog(c.timeout)
+	wdDone := wd.Start()
+	defer wd.Stop()
+
+	for {
+		select {
+		case item, ok := <-rowsCh:
+			if !ok {
+				return nil
+			}
+
+			wd.Kick()
+
+			err := yield(item.row, item.err)
+			if item.wrapper != nil {
+				rowWrapperPool.Put(item.wrapper)
+			}
+			if err != nil {
+				return err
+			}
+		case <-wdDone:
+			return converters.ErrScanTimeout
 		}
 	}
-
-	return nil
 }
 
 // ConvertToSQL implements StreamConverter for CSV files (outputs SQL to writer).
