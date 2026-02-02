@@ -78,6 +78,18 @@ func (c *MarkdownConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
+// GetColumnTypes implements RowProvider
+func (c *MarkdownConverter) GetColumnTypes(tableName string) []string {
+	for i, name := range c.tableNames {
+		if name == tableName {
+			headers := c.tables[i].headers
+			rows := c.tables[i].rows
+			return common.InferColumnTypes(rows, len(headers))
+		}
+	}
+	return nil
+}
+
 // ScanRows implements RowProvider
 func (c *MarkdownConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	for i, name := range c.tableNames {
@@ -111,7 +123,9 @@ func (c *MarkdownConverter) ConvertToSQL(writer io.Writer) error {
 
 		tableName := c.tableNames[i]
 		sanitizedHeaders := common.GenColumnNames(t.headers)
-		if err := writeTableSQL(tableName, sanitizedHeaders, t.rows, writer); err != nil {
+		colTypes := c.GetColumnTypes(tableName)
+
+		if err := writeTableSQL(tableName, sanitizedHeaders, colTypes, t.rows, writer); err != nil {
 			return err
 		}
 	}
@@ -119,8 +133,8 @@ func (c *MarkdownConverter) ConvertToSQL(writer io.Writer) error {
 	return nil
 }
 
-func writeTableSQL(tableName string, headers []string, rows [][]string, writer io.Writer) error {
-	createTableSQL := common.GenCreateTableSQL(tableName, headers)
+func writeTableSQL(tableName string, headers []string, colTypes []string, rows [][]string, writer io.Writer) error {
+	createTableSQL := common.GenCreateTableSQLWithTypes(tableName, headers, colTypes)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}

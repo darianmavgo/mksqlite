@@ -18,6 +18,7 @@ type MockProvider struct {
 	tableNames []string
 	headers    map[string][]string
 	rows       map[string][][]interface{}
+	colTypes   map[string][]string
 }
 
 // Ensure MockProvider implements common.RowProvider
@@ -37,6 +38,21 @@ func (m *MockProvider) ScanRows(tableName string, yield func([]interface{}, erro
 		if err := yield(row, nil); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (m *MockProvider) GetColumnTypes(tableName string) []string {
+	if types, ok := m.colTypes[tableName]; ok {
+		return types
+	}
+	// Fallback to all TEXT if not specified
+	if headers, ok := m.headers[tableName]; ok {
+		types := make([]string, len(headers))
+		for i := range types {
+			types[i] = "TEXT"
+		}
+		return types
 	}
 	return nil
 }

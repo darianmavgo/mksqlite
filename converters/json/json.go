@@ -195,6 +195,121 @@ func (c *JSONConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
+// GetColumnTypes implements RowProvider
+func (c *JSONConverter) GetColumnTypes(tableName string) []string {
+	info, ok := c.tables[tableName]
+	if !ok {
+		return nil
+	}
+
+	colTypes := make([]string, len(info.headers))
+	for i := range colTypes {
+		colTypes[i] = "TEXT" // Default
+	}
+
+	// Helper to infer type from a Go value
+	inferType := func(val interface{}) string {
+		switch val.(type) {
+		case float64:
+			// JSON numbers are float64. Check if it's an integer.
+			// However, without inspecting the raw text or checking for decimals, it's hard.
+			// But usually if it has no decimals, we can say INTEGER?
+			// Or just REAL to be safe for JSON numbers?
+			// SQLite handles REAL well.
+			// Actually, let's treat it as REAL for safety unless we are sure.
+			// But common.ReferColumnTypes uses strconv.ParseInt.
+			// Let's use logic: if float matches integer value exactly.
+			f := val.(float64)
+			if f == float64(int64(f)) {
+				return "INTEGER"
+			}
+			return "REAL"
+		case string:
+			return "TEXT"
+		case bool:
+			return "INTEGER" // SQLite uses 0/1 for bool
+		case nil:
+			return "TEXT" // fallback
+		default:
+			// Arrays/Objects -> TEXT (JSON string)
+			return "TEXT"
+		}
+	}
+
+	// Strategy:
+	// 1. If streaming (arrayTable active) and tableName matches: use c.firstRow
+	// 2. If in-memory (objData active): scan sample rows
+
+	if c.arrayTable != "" && tableName == c.arrayTable {
+		if c.firstRow != nil {
+			for i, rawHeader := range info.rawHeaders {
+				if val, ok := c.firstRow[rawHeader]; ok {
+					colTypes[i] = inferType(val)
+				}
+			}
+		}
+		return colTypes
+	}
+
+	if c.objData != nil {
+		// In-memory
+		if arr, ok := c.objData[info.arrayKey].([]interface{}); ok {
+			// Scan up to 15 rows, focusing on 5-15
+			start := 0
+			end := 15
+			if len(arr) < end {
+				end = len(arr)
+			}
+
+			// We track types. If any row says TEXT, it becomes TEXT.
+			// If all are INT, it's INT. If INT and REAL, it's REAL.
+
+			// Initialize with "unknown" state?
+			// Let's iterate columns
+			for i, rawHeader := range info.rawHeaders {
+				isInt := true
+				isReal := true
+				hasData := false
+
+				for idx := start; idx < end; idx++ {
+					rowMap, ok := arr[idx].(map[string]interface{})
+					if !ok {
+						continue // Skip primitives for now or handle?
+					}
+
+					val, ok := rowMap[rawHeader]
+					if !ok || val == nil {
+						continue
+					}
+					hasData = true
+
+					t := inferType(val)
+					if t == "TEXT" {
+						isInt = false
+						isReal = false
+						break
+					}
+					if t == "REAL" {
+						isInt = false
+						// Keep isReal true
+					}
+					// If INTEGER, isInt stays true, isReal stays true (valid real)
+				}
+
+				if hasData {
+					if isInt {
+						colTypes[i] = "INTEGER"
+					} else if isReal {
+						colTypes[i] = "REAL"
+					}
+				}
+			}
+		}
+	}
+
+	return colTypes
+}
+
 // ScanRows implements RowProvider
 func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	info, ok := c.tables[tableName]
@@ -418,7 +533,9 @@ func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []int
 func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
 	for _, tableName := range c.GetTableNames() {
 		headers := c.GetHeaders(tableName)
-		createSQL := common.GenCreateTableSQL(tableName, headers)
+		colTypes := c.GetColumnTypes(tableName)
+
+		createSQL := common.GenCreateTableSQLWithTypes(tableName, headers, colTypes)
 		if _, err := fmt.Fprintf(writer, "%s;\n\n", createSQL); err != nil {
 			return err
 		}

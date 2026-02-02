@@ -18,6 +18,7 @@ type StreamConverter interface {
 type RowProvider interface {
 	GetTableNames() []string
 	GetHeaders(tableName string) []string
+	GetColumnTypes(tableName string) []string
 	// ScanRows iterates over rows for the given table.
 	// It calls the yield function for each row.
 	// The yield function accepts a row and an optional error associated with that row.

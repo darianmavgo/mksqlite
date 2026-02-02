@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"github.com/darianmavgo/mksqlite/converters"
-	"github.com/darianmavgo/mksqlite/converters/common"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/common"
 )
 
 func init() {
@@ -155,6 +156,17 @@ func (z *ZipConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
+// GetColumnTypes implements RowProvider
+func (z *ZipConverter) GetColumnTypes(tableName string) []string {
+	if tableName == "file_list" {
+		// name: TEXT, comment: TEXT, modified: TEXT
+		// uncompressed_size: INTEGER, compressed_size: INTEGER
+		// crc32: INTEGER, is_dir: INTEGER
+		return []string{"TEXT", "TEXT", "TEXT", "INTEGER", "INTEGER", "INTEGER", "INTEGER"}
+	}
+	return nil
+}
+
 // ScanRows implements RowProvider
 func (z *ZipConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	if tableName != "file_list" {
@@ -191,7 +203,9 @@ func (z *ZipConverter) ConvertToSQL(writer io.Writer) error {
 	// Write CREATE TABLE
 	tableName := "file_list"
 	headers := z.GetHeaders(tableName)
-	createTableSQL := common.GenCreateTableSQL(tableName, headers)
+	colTypes := z.GetColumnTypes(tableName)
+
+	createTableSQL := common.GenCreateTableSQLWithTypes(tableName, headers, colTypes)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}

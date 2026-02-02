@@ -157,6 +157,15 @@ func (c *CSVConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
+// GetColumnTypes implements RowProvider
+func (c *CSVConverter) GetColumnTypes(tableName string) []string {
+	if tableName != c.Config.TableName {
+		return nil
+	}
+	// Use buffered rows for inference
+	return common.InferColumnTypes(c.bufferedRows, len(c.headers))
+}
+
 // padRow pads or truncates the row to match the target length.
 func padRow(row []string, targetLen int) []string {
 	if len(row) < targetLen {
@@ -265,8 +274,11 @@ func (c *CSVConverter) ConvertToSQL(writer io.Writer) error {
 		return fmt.Errorf("CSV reader is not initialized")
 	}
 
+	// Get column types
+	colTypes := c.GetColumnTypes(c.Config.TableName)
+
 	// Write CREATE TABLE statement
-	createTableSQL := common.GenCreateTableSQL(c.Config.TableName, c.headers)
+	createTableSQL := common.GenCreateTableSQLWithTypes(c.Config.TableName, c.headers, colTypes)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}

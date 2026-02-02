@@ -72,6 +72,14 @@ func (c *TxtConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
+// GetColumnTypes implements RowProvider
+func (c *TxtConverter) GetColumnTypes(tableName string) []string {
+	if tableName == c.Config.TableName {
+		return []string{"TEXT"}
+	}
+	return nil
+}
+
 // ScanRows implements RowProvider using a worker pattern (pipelining) to improve streaming performance.
 func (c *TxtConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	if tableName != c.Config.TableName {
@@ -125,7 +133,8 @@ func (c *TxtConverter) ConvertToSQL(writer io.Writer) error {
 	}
 
 	// Write CREATE TABLE statement
-	createTableSQL := common.GenCreateTableSQL(c.Config.TableName, []string{"content"})
+	// Write CREATE TABLE statement
+	createTableSQL := common.GenCreateTableSQLWithTypes(c.Config.TableName, []string{"content"}, []string{"TEXT"})
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}

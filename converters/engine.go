@@ -139,7 +139,9 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 		if opts != nil && opts.Verbose {
 			log.Printf("[MKSQLITE] Creating table: %s with headers: %v", tableName, headers)
 		}
-		createTableSQL := common.GenCreateTableSQL(tableName, headers)
+
+		colTypes := provider.GetColumnTypes(tableName)
+		createTableSQL := common.GenCreateTableSQLWithTypes(tableName, headers, colTypes)
 		_, err := db.Exec(createTableSQL)
 		if err != nil {
 			return fmt.Errorf("failed to create table %s: %w", tableName, err)

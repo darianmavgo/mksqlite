@@ -96,6 +96,18 @@ func (c *FilesystemConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
+// GetColumnTypes implements RowProvider
+func (c *FilesystemConverter) GetColumnTypes(tableName string) []string {
+	if tableName == FSTB {
+		return []string{
+			"TEXT", "TEXT", "INTEGER", "TEXT",
+			"TEXT", "TEXT", "TEXT",
+			"INTEGER", "TEXT",
+		}
+	}
+	return nil
+}
+
 // ScanRows implements RowProvider
 func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
 	if tableName != FSTB {
@@ -338,7 +350,8 @@ func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
 	}
 
 	// Write CREATE TABLE statement
-	createTableSQL := common.GenCreateTableSQL(FSTB, headers)
+	colTypes := c.GetColumnTypes(FSTB)
+	createTableSQL := common.GenCreateTableSQLWithTypes(FSTB, headers, colTypes)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}

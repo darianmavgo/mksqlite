@@ -3,6 +3,7 @@ package common
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -88,14 +89,83 @@ func GenTableNames(rawtables []string) []string {
 	return GenCompliantNames(rawtables, TBPRE)
 }
 
-func GenColumnTypes(columnnames []string) []string {
-	// This is going to make everything text for now.
-	// Until there is a quality way to discern types without manual input from user.
-	coltypes := make([]string, len(columnnames))
-	for idx := range columnnames {
-		coltypes[idx] = "TEXT"
+// InferColumnTypes analyzes row data to determine the most appropriate SQLite data type
+// for each column. It checks rows 5 through 15 (if available) as requested.
+func InferColumnTypes(rows [][]string, columnCount int) []string {
+	colTypes := make([]string, columnCount)
+	for i := range colTypes {
+		colTypes[i] = "TEXT" // Default to TEXT
 	}
-	return coltypes
+
+	if len(rows) == 0 {
+		return colTypes
+	}
+
+	// Determine range of rows to scan (5 through 15)
+	start := 5
+	if start >= len(rows) {
+		start = 0 // Fallback to beginning if not enough rows
+	}
+	end := 15
+	if end > len(rows) {
+		end = len(rows)
+	}
+
+	if start >= end {
+		// Just in case
+		start = 0
+		end = len(rows)
+	}
+
+	for colIdx := 0; colIdx < columnCount; colIdx++ {
+		isInt := true
+		isReal := true
+		hasData := false
+
+		for rowIdx := start; rowIdx < end; rowIdx++ {
+			row := rows[rowIdx]
+			if colIdx >= len(row) {
+				continue
+			}
+			val := strings.TrimSpace(row[colIdx])
+			if val == "" {
+				continue // Skip empty values
+			}
+			hasData = true
+
+			// Check Integer
+			if isInt {
+				if _, err := strconv.ParseInt(val, 10, 64); err != nil {
+					isInt = false
+				}
+			}
+
+			// Check Real
+			if isReal {
+				if _, err := strconv.ParseFloat(val, 64); err != nil {
+					isReal = false
+				}
+			}
+
+			if !isInt && !isReal {
+				break
+			}
+		}
+
+		if hasData {
+			if isInt {
+				colTypes[colIdx] = "INTEGER"
+			} else if isReal {
+				colTypes[colIdx] = "REAL"
+			}
+		}
+	}
+
+	return colTypes
+}
+
+func GenColumnTypes(columnnames []string) []string {
+	return InferColumnTypes(nil, len(columnnames))
 }
 
 // AssessHeaderRow scans up to N rows and returns the index of the best candidate for the header row.
@@ -246,6 +316,31 @@ func GenCreateTableSQL(tableName string, columnNames []string) string {
 		builder.WriteString(name)
 		builder.WriteByte(' ')
 		builder.WriteString(colTypes[i])
+		if i < len(columnNames)-1 {
+			builder.WriteString(", ")
+		}
+	}
+	builder.WriteByte(')')
+	return builder.String()
+}
+
+// GenCreateTableSQLWithTypes generates a CREATE TABLE SQL statement with specific column types
+func GenCreateTableSQLWithTypes(tableName string, columnNames []string, columnTypes []string) string {
+	if len(columnNames) != len(columnTypes) {
+		// Fallback if mismatch
+		return GenCreateTableSQL(tableName, columnNames)
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(tableName) + len(columnNames)*20)
+
+	builder.WriteString("CREATE TABLE ")
+	builder.WriteString(tableName)
+	builder.WriteString(" (")
+	for i, name := range columnNames {
+		builder.WriteString(name)
+		builder.WriteByte(' ')
+		builder.WriteString(columnTypes[i])
 		if i < len(columnNames)-1 {
 			builder.WriteString(", ")
 		}
