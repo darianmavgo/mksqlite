@@ -170,7 +170,13 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 
 	// Start walking
 	wg.Add(1)
-	go c.processDir(ctx, c.inputPath, &wg, sem, results)
+	select {
+	case sem <- struct{}{}:
+		go c.processDir(ctx, c.inputPath, &wg, sem, results)
+	case <-ctx.Done():
+		// Context cancelled before we could start
+		wg.Done()
+	}
 
 	// Monitor completion
 	go func() {
@@ -185,20 +191,13 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 func (c *FilesystemConverter) processDir(ctx context.Context, dirPath string, wg *sync.WaitGroup, sem chan struct{}, results chan<- []interface{}) {
 	defer wg.Done()
 
-	// Acquire semaphore for directory reading
-	select {
-	case sem <- struct{}{}:
-	case <-ctx.Done():
-		return
-	}
-
 	// Read directory with timeout
 	// Default 30s timeout for directory listing
 	entries, err := runWithTimeout(30*time.Second, func() ([]fs.DirEntry, error) {
 		return os.ReadDir(dirPath)
 	})
 
-	// Release semaphore immediately after IO
+	// Release semaphore immediately after IO (acquired by caller)
 	<-sem
 
 	if err != nil {
@@ -221,25 +220,31 @@ func (c *FilesystemConverter) processDir(ctx context.Context, dirPath string, wg
 		}
 
 		if d.IsDir() {
-			wg.Add(1)
-			go c.processDir(ctx, fullPath, wg, sem, results)
+			// Backpressure for directories too
+			select {
+			case sem <- struct{}{}:
+				wg.Add(1)
+				go c.processDir(ctx, fullPath, wg, sem, results)
+			case <-ctx.Done():
+				return
+			}
 		} else {
-			wg.Add(1)
-			go c.processFile(ctx, fullPath, d, wg, sem, results)
+			// Backpressure: Acquire semaphore BEFORE spawning the goroutine.
+			// This prevents creating millions of goroutines for large directories.
+			select {
+			case sem <- struct{}{}:
+				wg.Add(1)
+				go c.processFile(ctx, fullPath, d, wg, sem, results)
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }
 
 func (c *FilesystemConverter) processFile(ctx context.Context, path string, d fs.DirEntry, wg *sync.WaitGroup, sem chan struct{}, results chan<- []interface{}) {
 	defer wg.Done()
-
-	// Acquire semaphore for file processing (stat/mime)
-	select {
-	case sem <- struct{}{}:
-	case <-ctx.Done():
-		return
-	}
-	defer func() { <-sem }()
+	defer func() { <-sem }() // Release semaphore acquired by caller
 
 	relPath, err := filepath.Rel(c.inputPath, path)
 	if err != nil {
@@ -413,10 +418,13 @@ func runWithTimeout[T any](timeout time.Duration, fn func() (T, error)) (T, erro
 		res, err = fn()
 	}()
 
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
 	case <-done:
 		return res, err
-	case <-time.After(timeout):
+	case <-timer.C:
 		var zero T
 		return zero, fmt.Errorf("operation timed out after %v", timeout)
 	}
