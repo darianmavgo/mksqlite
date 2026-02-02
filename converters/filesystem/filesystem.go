@@ -76,6 +76,7 @@ func NewFilesystemConverter(inputPath string) (*FilesystemConverter, error) {
 	return &FilesystemConverter{
 		inputPath:      inputPath,
 		resumptionPath: "",
+		timeout:        10 * time.Second,
 	}, nil
 }
 
@@ -137,33 +138,94 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 
 	// Cancellation mechanism
 	doneCh := make(chan struct{})
-	var timeoutCh <-chan time.Time
+	var idleTimeout time.Duration
 	if c.timeout > 0 {
-		timeoutCh = time.After(c.timeout)
-		log.Printf("Filesystem scan timeout set to %v", c.timeout)
+		idleTimeout = c.timeout
+		log.Printf("Filesystem scan idle timeout set to %v", c.timeout)
 	}
 
 	// Progress tracker
 	var rowCount int64
 	lastLog := time.Now()
 
-	// Start result consumer
+	// Consumer goroutine that writes to yield
 	consumerDone := make(chan error, 1)
 	go func() {
 		defer close(consumerDone)
-		for row := range results {
-			rowCount++
-			if time.Since(lastLog) > 2*time.Second {
-				log.Printf("Scanned %d files...", rowCount)
-				lastLog = time.Now()
-			}
-			if err := yield(row, nil); err != nil {
-				consumerDone <- err
+
+		var timer *time.Timer
+		var timerCh <-chan time.Time
+
+		if idleTimeout > 0 {
+			timer = time.NewTimer(idleTimeout)
+			timerCh = timer.C
+			defer timer.Stop()
+		}
+
+		for {
+
+			select {
+			case row, ok := <-results:
+				if !ok {
+					consumerDone <- nil
+					return
+				}
+
+				// Reset idle timer
+				if timer != nil {
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					timer.Reset(idleTimeout)
+				}
+
+				rowCount++
+				if time.Since(lastLog) > 2*time.Second {
+					log.Printf("Scanned %d files...", rowCount)
+					lastLog = time.Now()
+				}
+				if err := yield(row, nil); err != nil {
+					consumerDone <- err
+					return
+				}
+			case <-timerCh:
+				// Timed out due to inactivity
+				log.Printf("Scan halted due to inactivity timeout (%v) after %d files.", idleTimeout, rowCount)
+				close(doneCh) // Signal cancellation to workers
+				consumerDone <- converters.ErrScanTimeout
+				return
+			case <-doneCh:
+				// Externally cancelled (should not happen if we are the ones cancelling via timer,
+				// but defensive in case we add other cancellation triggers)
+				consumerDone <- converters.ErrScanTimeout
 				return
 			}
 		}
-		log.Printf("Scan completed total files: %d", rowCount)
-		consumerDone <- nil
+	}()
+
+	// Initial job tracking (Must happen before starting cleanup monitor)
+	wg.Add(1)
+
+	// Cleanup Monitor
+	// This ensures that when everything stops (either by finish or timeout), we clean up
+	go func() {
+		wg.Wait()
+		// Only close results if we finished normally (doneCh not closed)
+		// Or if we know nobody is writing.
+		// If timeout happened, doneCh is closed. Workers might still be stuck.
+		// If we close results, stuck workers might panic if they blindly send.
+		// However, processFile selects on doneCh:
+		// case results <- row:
+		// case <-doneCh: return
+		// So if doneCh is closed, they stop sending.
+		// Is it safe to close results then? Yes, but only after we are sure they saw doneCh.
+		// wg.Wait() guarantees they are done (or saw doneCh and exited).
+		// So if wg.Wait returns, it is safe to close results.
+		close(results)
+		close(jobs)
 	}()
 
 	// Semaphore to limit number of concurrent directory reads/file stats
@@ -327,43 +389,20 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 		}
 	}
 
+	// Start workers
 	for i := 0; i < numWorkers; i++ {
 		go startWorker()
 	}
 
-	// Initial job
-	wg.Add(1)
-	jobs <- c.inputPath
+	// Submit initial job
+	select {
+	case jobs <- c.inputPath:
+	case <-doneCh:
+		wg.Done()
+	}
 
-	// Monitoring and cleanup
-	go func() {
-		// Wait for completion OR timeout
-		doneWaiting := make(chan struct{})
-		go func() {
-			wg.Wait()
-			close(doneWaiting)
-		}()
-
-		select {
-		case <-doneWaiting:
-			// All done normally
-		case <-timeoutCh:
-			log.Printf("Scan timeout reached (%v). Force closing...", c.timeout)
-			close(doneCh) // Signal workers to stop
-			// Wait for workers to clean up (optional, but good for non-leaking)
-			// effectively we just want to stop receiving results.
-			// But we should wait for wg to ensure we don't close results while someone is writing?
-			// Since workers check doneCh before writing to results (indirectly via processFile? No processFile blocks).
-			// We need to make sure processFile selects on doneCh too ideally, or just accept panic on closed channel?
-			// Better: just wait. Workers should exit fast on doneCh.
-			<-doneWaiting
-		}
-
-		close(jobs)
-		close(results)
-	}()
-
-	// Wait logic is handled by consumerDone
+	// Main Wait Logic
+	// We only wait for consumerDone because timeout is handled inside consumer
 	return <-consumerDone
 }
 

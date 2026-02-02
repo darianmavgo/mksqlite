@@ -17,6 +17,7 @@ import (
 )
 
 var ErrInterrupted = errors.New("operation interrupted by user")
+var ErrScanTimeout = errors.New("scan timed out")
 
 var (
 	// BatchSize defines the number of rows to insert before committing a transaction.
@@ -264,13 +265,13 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 		}
 
 		if err != nil {
-			if errors.Is(err, ErrInterrupted) {
+			if errors.Is(err, ErrInterrupted) || errors.Is(err, ErrScanTimeout) {
 				if opts != nil && opts.Verbose {
-					log.Printf("[MKSQLITE] Interrupted! Committing partial transaction for table %s...", tableName)
+					log.Printf("[MKSQLITE] Stopped (%v). Committing partial transaction for table %s...", err, tableName)
 				}
 				// Commit what we have
 				if commitErr := tx.Commit(); commitErr != nil {
-					log.Printf("[MKSQLITE] Failed to commit on interrupt: %v", commitErr)
+					log.Printf("[MKSQLITE] Failed to commit on stop: %v", commitErr)
 				}
 				return err
 			}
