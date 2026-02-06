@@ -3,11 +3,13 @@ package json
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
@@ -20,7 +22,7 @@ func init() {
 type jsonDriver struct{}
 
 func (d *jsonDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
-	return NewJSONConverter(source)
+	return NewJSONConverterWithConfig(source, config)
 }
 
 // JSONConverter converts JSON files to SQLite tables
@@ -38,6 +40,7 @@ type JSONConverter struct {
 	isSeeker bool
 	seeker   io.ReadSeeker
 	objData  map[string]interface{} // If we load fully
+	timeout  time.Duration
 }
 
 type jsonTableInfo struct {
@@ -55,6 +58,11 @@ var _ common.StreamConverter = (*JSONConverter)(nil)
 
 // NewJSONConverter creates a new JSONConverter from an io.Reader.
 func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
+	return NewJSONConverterWithConfig(r, nil)
+}
+
+// NewJSONConverterWithConfig creates a new JSONConverter from an io.Reader with optional config.
+func NewJSONConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*JSONConverter, error) {
 	seeker, isSeeker := r.(io.ReadSeeker)
 
 	dec := json.NewDecoder(bufio.NewReaderSize(r, 65536))
@@ -70,11 +78,23 @@ func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
 		return nil, fmt.Errorf("expected JSON object or array at root")
 	}
 
+	if config == nil {
+		config = &common.ConversionConfig{}
+	}
+
+	var timeout time.Duration
+	if config.ScanTimeout != "" {
+		if d, err := time.ParseDuration(config.ScanTimeout); err == nil {
+			timeout = d
+		}
+	}
+
 	c := &JSONConverter{
 		reader:   r,
 		isSeeker: isSeeker,
 		seeker:   seeker,
 		tables:   make(map[string]*jsonTableInfo),
+		timeout:  timeout,
 	}
 
 	if delim == '[' {
@@ -311,7 +331,7 @@ func (c *JSONConverter) GetColumnTypes(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (c *JSONConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	info, ok := c.tables[tableName]
 	if !ok {
 		return nil
@@ -329,50 +349,119 @@ func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}, err
 		}
 
 		// Stream the rest
-		for c.decoder.More() {
-			t, err := c.decoder.Token()
-			if err != nil {
-				return fmt.Errorf("error reading token: %w", err)
-			}
+		type rowOrError struct {
+			row []interface{}
+			err error
+		}
+		rowsCh := make(chan rowOrError, 100)
+		cancelCh := make(chan struct{})
 
-			var rowMap map[string]json.RawMessage
-			if delim, ok := t.(json.Delim); ok && delim == '{' {
-				// Object optimization: stream keys
-				rowMap = make(map[string]json.RawMessage)
-				for c.decoder.More() {
-					keyToken, err := c.decoder.Token()
-					if err != nil {
-						return fmt.Errorf("error reading key: %w", err)
-					}
-					key, ok := keyToken.(string)
-					if !ok {
-						return fmt.Errorf("expected string key")
-					}
-					var val json.RawMessage
-					if err := c.decoder.Decode(&val); err != nil {
-						return fmt.Errorf("error decoding value for key %s: %w", key, err)
-					}
-					rowMap[key] = val
+		go func() {
+			defer close(rowsCh)
+			for c.decoder.More() {
+				// Check cancellation
+				select {
+				case <-cancelCh:
+					return
+				default:
 				}
-				// Consume closing '}'
-				if _, err := c.decoder.Token(); err != nil {
-					return fmt.Errorf("error reading closing brace: %w", err)
-				}
-			} else {
-				// Non-object: fallback
-				raw, err := reconstructRawJSON(t, c.decoder)
+
+				t, err := c.decoder.Token()
 				if err != nil {
-					return fmt.Errorf("error reconstructing raw json: %w", err)
+					select {
+					case rowsCh <- rowOrError{err: fmt.Errorf("error reading token: %w", err)}:
+					case <-cancelCh:
+					}
+					return
 				}
-				rowMap = map[string]json.RawMessage{"value": raw}
-			}
 
-			row := flattenRowRaw(rowMap, info.rawHeaders)
-			if err := yield(row, nil); err != nil {
-				return err
+				var rowMap map[string]json.RawMessage
+				if delim, ok := t.(json.Delim); ok && delim == '{' {
+					// Object optimization: stream keys
+					rowMap = make(map[string]json.RawMessage)
+					for c.decoder.More() {
+						keyToken, err := c.decoder.Token()
+						if err != nil {
+							select {
+							case rowsCh <- rowOrError{err: fmt.Errorf("error reading key: %w", err)}:
+							case <-cancelCh:
+							}
+							return
+						}
+						key, ok := keyToken.(string)
+						if !ok {
+							select {
+							case rowsCh <- rowOrError{err: fmt.Errorf("expected string key")}:
+							case <-cancelCh:
+							}
+							return
+						}
+						var val json.RawMessage
+						if err := c.decoder.Decode(&val); err != nil {
+							select {
+							case rowsCh <- rowOrError{err: fmt.Errorf("error decoding value for key %s: %w", key, err)}:
+							case <-cancelCh:
+							}
+							return
+						}
+						rowMap[key] = val
+					}
+					// Consume closing '}'
+					if _, err := c.decoder.Token(); err != nil {
+						select {
+						case rowsCh <- rowOrError{err: fmt.Errorf("error reading closing brace: %w", err)}:
+						case <-cancelCh:
+						}
+						return
+					}
+				} else {
+					// Non-object: fallback
+					raw, err := reconstructRawJSON(t, c.decoder)
+					if err != nil {
+						select {
+						case rowsCh <- rowOrError{err: fmt.Errorf("error reconstructing raw json: %w", err)}:
+						case <-cancelCh:
+						}
+						return
+					}
+					rowMap = map[string]json.RawMessage{"value": raw}
+				}
+
+				row := flattenRowRaw(rowMap, info.rawHeaders)
+				select {
+				case rowsCh <- rowOrError{row: row}:
+				case <-cancelCh:
+					return
+				}
+			}
+		}()
+
+		// Consumer
+		defer close(cancelCh)
+		wd := common.NewWatchdog(c.timeout)
+		wdDone := wd.Start()
+		defer wd.Stop()
+
+		for {
+			select {
+			case item, ok := <-rowsCh:
+				if !ok {
+					return nil
+				}
+				wd.Kick()
+
+				if item.err != nil {
+					return item.err
+				}
+				if err := yield(item.row, nil); err != nil {
+					return err
+				}
+			case <-wdDone:
+				return converters.ErrScanTimeout
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 		}
-		return nil
 	}
 
 	// Case 2: In-Memory Object
@@ -530,7 +619,7 @@ func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []int
 }
 
 // ConvertToSQL implements StreamConverter
-func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
+func (c *JSONConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	for _, tableName := range c.GetTableNames() {
 		headers := c.GetHeaders(tableName)
 		colTypes := c.GetColumnTypes(tableName)
@@ -540,52 +629,52 @@ func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
 			return err
 		}
 
-		err := c.ScanRows(tableName, func(row []interface{}, err error) error {
+		err := c.ScanRows(ctx, tableName, func(row []interface{}, err error) error {
 			if err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", tableName); err != nil {
+			if _, err := fmt.Fprintf(bw, "INSERT INTO %s (", tableName); err != nil {
 				return err
 			}
 			// columns
 			for i, h := range headers {
 				if i > 0 {
-					if _, err := fmt.Fprint(writer, ", "); err != nil {
+					if _, err := fmt.Fprint(bw, ", "); err != nil {
 						return err
 					}
 				}
-				if _, err := fmt.Fprint(writer, h); err != nil {
+				if _, err := fmt.Fprint(bw, h); err != nil {
 					return err
 				}
 			}
-			if _, err := fmt.Fprint(writer, ") VALUES ("); err != nil {
+			if _, err := fmt.Fprint(bw, ") VALUES ("); err != nil {
 				return err
 			}
 			// values
 			for i, val := range row {
 				if i > 0 {
-					if _, err := fmt.Fprint(writer, ", "); err != nil {
+					if _, err := fmt.Fprint(bw, ", "); err != nil {
 						return err
 					}
 				}
 				// handle types
 				switch v := val.(type) {
 				case nil:
-					if _, err := fmt.Fprint(writer, "NULL"); err != nil {
+					if _, err := fmt.Fprint(bw, "NULL"); err != nil {
 						return err
 					}
 				case string:
 					escaped := strings.ReplaceAll(v, "'", "''")
-					if _, err := fmt.Fprintf(writer, "'%s'", escaped); err != nil {
+					if _, err := fmt.Fprintf(bw, "'%s'", escaped); err != nil {
 						return err
 					}
 				default:
-					if _, err := fmt.Fprintf(writer, "'%v'", v); err != nil {
+					if _, err := fmt.Fprintf(bw, "'%v'", v); err != nil {
 						return err
 					}
 				}
 			}
-			if _, err := fmt.Fprint(writer, ");\n"); err != nil {
+			if _, err := fmt.Fprint(bw, ");\n"); err != nil {
 				return err
 			}
 			return nil
@@ -593,9 +682,9 @@ func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if _, err := fmt.Fprint(writer, "\n"); err != nil {
+		if _, err := fmt.Fprint(bw, "\n"); err != nil {
 			return err
 		}
 	}
-	return nil
+	return bw.Flush()
 }

@@ -2,6 +2,7 @@
 package converters
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -187,20 +188,12 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 
 		rowCount := 0
 
-		// Setup signal handling for this table's processing
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(sigChan)
+		// Setup signal handling context
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
 
 		// Insert rows using streaming ScanRows
-		err = provider.ScanRows(tableName, func(row []interface{}, rowErr error) error {
-			// Check for interruption non-blocking
-			select {
-			case <-sigChan:
-				return ErrInterrupted
-			default:
-			}
-
+		err = provider.ScanRows(ctx, tableName, func(row []interface{}, rowErr error) error {
 			if rowErr != nil {
 				if logErrors {
 					// Log provider error

@@ -1,6 +1,8 @@
 package excel
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -194,7 +196,7 @@ func (e *ExcelConverter) GetColumnTypes(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (e *ExcelConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	sheetName, ok := e.sheetMap[tableName]
 	if !ok {
 		return nil // Should not happen if GetTableNames is correct
@@ -232,6 +234,13 @@ func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}, er
 		if err := yield(interfaceRow, nil); err != nil {
 			return err
 		}
+
+		// Check cancel
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 
 	return nil
@@ -246,10 +255,12 @@ func (e *ExcelConverter) Close() error {
 }
 
 // ConvertToSQL implements StreamConverter for Excel files (outputs SQL to writer)
-func (e *ExcelConverter) ConvertToSQL(writer io.Writer) error {
+func (e *ExcelConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	if e.file == nil {
 		return fmt.Errorf("ExcelConverter not initialized")
 	}
+
+	bw := bufio.NewWriter(writer)
 
 	for _, tableName := range e.tableNames {
 		headers := e.headers[tableName]
@@ -266,34 +277,34 @@ func (e *ExcelConverter) ConvertToSQL(writer io.Writer) error {
 			return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 		}
 
-		err := e.ScanRows(tableName, func(row []interface{}, err error) error {
+		err := e.ScanRows(ctx, tableName, func(row []interface{}, err error) error {
 			if err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", tableName); err != nil {
+			if _, err := fmt.Fprintf(bw, "INSERT INTO %s (", tableName); err != nil {
 				return fmt.Errorf("failed to write INSERT start: %w", err)
 			}
 
 			// Write column names
 			for i, header := range headers {
 				if i > 0 {
-					if _, err := writer.Write([]byte(", ")); err != nil {
+					if _, err := bw.Write([]byte(", ")); err != nil {
 						return fmt.Errorf("failed to write column separator: %w", err)
 					}
 				}
-				if _, err := fmt.Fprintf(writer, "%s", header); err != nil {
+				if _, err := fmt.Fprintf(bw, "%s", header); err != nil {
 					return fmt.Errorf("failed to write column name: %w", err)
 				}
 			}
 
-			if _, err := fmt.Fprintf(writer, ") VALUES ("); err != nil {
+			if _, err := fmt.Fprintf(bw, ") VALUES ("); err != nil {
 				return fmt.Errorf("failed to write VALUES start: %w", err)
 			}
 
 			// Write values
 			for i, val := range row {
 				if i > 0 {
-					if _, err := writer.Write([]byte(", ")); err != nil {
+					if _, err := bw.Write([]byte(", ")); err != nil {
 						return fmt.Errorf("failed to write value separator: %w", err)
 					}
 				}
@@ -309,12 +320,12 @@ func (e *ExcelConverter) ConvertToSQL(writer io.Writer) error {
 
 				// Escape single quotes by doubling them
 				escapedVal := strings.ReplaceAll(strVal, "'", "''")
-				if _, err := fmt.Fprintf(writer, "'%s'", escapedVal); err != nil {
+				if _, err := fmt.Fprintf(bw, "'%s'", escapedVal); err != nil {
 					return fmt.Errorf("failed to write value: %w", err)
 				}
 			}
 
-			if _, err := writer.Write([]byte(");\n")); err != nil {
+			if _, err := bw.Write([]byte(");\n")); err != nil {
 				return fmt.Errorf("failed to write statement end: %w", err)
 			}
 			return nil
@@ -324,10 +335,10 @@ func (e *ExcelConverter) ConvertToSQL(writer io.Writer) error {
 			return err
 		}
 
-		if _, err := writer.Write([]byte("\n")); err != nil {
+		if _, err := bw.Write([]byte("\n")); err != nil {
 			return fmt.Errorf("failed to write table separator: %w", err)
 		}
 	}
 
-	return nil
+	return bw.Flush()
 }

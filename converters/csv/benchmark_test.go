@@ -2,6 +2,7 @@ package csv
 
 import (
 	"bytes"
+	"context"
 	"testing"
 )
 
@@ -26,7 +27,7 @@ func BenchmarkScanRows(b *testing.B) {
 			b.Fatalf("NewCSVConverter failed: %v", err)
 		}
 
-		err = converter.ScanRows(CSVTB, func(row []interface{}, err error) error {
+		err = converter.ScanRows(context.Background(), CSVTB, func(row []interface{}, err error) error {
 			if err != nil {
 				return err
 			}
@@ -36,6 +37,35 @@ func BenchmarkScanRows(b *testing.B) {
 		})
 		if err != nil {
 			b.Fatalf("ScanRows failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkConvertToSQL(b *testing.B) {
+	// Generate a CSV with 10 columns and many rows
+	var buf bytes.Buffer
+	headers := "col1,col2,col3,col4,col5,col6,col7,col8,col9,col10\n"
+	buf.WriteString(headers)
+	rowStr := "val1,val2,val3,val4,val5,val6,val7,val8,val9,val10\n"
+	// 1000 rows
+	for i := 0; i < 1000; i++ {
+		buf.WriteString(rowStr)
+	}
+	content := buf.Bytes()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		reader := bytes.NewReader(content)
+		converter, err := NewCSVConverter(reader)
+		if err != nil {
+			b.Fatalf("NewCSVConverter failed: %v", err)
+		}
+
+		var out bytes.Buffer
+		err = converter.ConvertToSQL(&out)
+		if err != nil {
+			b.Fatalf("ConvertToSQL failed: %v", err)
 		}
 	}
 }

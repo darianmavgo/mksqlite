@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"regexp"
@@ -91,7 +92,7 @@ func (c *MarkdownConverter) GetColumnTypes(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (c *MarkdownConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (c *MarkdownConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	for i, name := range c.tableNames {
 		if name == tableName {
 			rows := c.tables[i].rows
@@ -103,6 +104,12 @@ func (c *MarkdownConverter) ScanRows(tableName string, yield func([]interface{},
 				if err := yield(interfaceRow, nil); err != nil {
 					return err
 				}
+				// Check cancel
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
 			}
 			return nil
 		}
@@ -111,7 +118,7 @@ func (c *MarkdownConverter) ScanRows(tableName string, yield func([]interface{},
 }
 
 // ConvertToSQL implements StreamConverter
-func (c *MarkdownConverter) ConvertToSQL(writer io.Writer) error {
+func (c *MarkdownConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	if len(c.tables) == 0 {
 		return fmt.Errorf("no tables found in Markdown")
 	}
@@ -125,7 +132,7 @@ func (c *MarkdownConverter) ConvertToSQL(writer io.Writer) error {
 		sanitizedHeaders := common.GenColumnNames(t.headers)
 		colTypes := c.GetColumnTypes(tableName)
 
-		if err := writeTableSQL(tableName, sanitizedHeaders, colTypes, t.rows, writer); err != nil {
+		if err := writeTableSQL(ctx, tableName, sanitizedHeaders, colTypes, t.rows, writer); err != nil {
 			return err
 		}
 	}
@@ -133,7 +140,7 @@ func (c *MarkdownConverter) ConvertToSQL(writer io.Writer) error {
 	return nil
 }
 
-func writeTableSQL(tableName string, headers []string, colTypes []string, rows [][]string, writer io.Writer) error {
+func writeTableSQL(ctx context.Context, tableName string, headers []string, colTypes []string, rows [][]string, writer io.Writer) error {
 	createTableSQL := common.GenCreateTableSQLWithTypes(tableName, headers, colTypes)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
@@ -184,6 +191,12 @@ func writeTableSQL(tableName string, headers []string, colTypes []string, rows [
 
 		if _, err := writer.Write([]byte(");\n")); err != nil {
 			return fmt.Errorf("failed to write statement end: %w", err)
+		}
+		// Check cancel
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
 	}
 	if _, err := writer.Write([]byte("\n")); err != nil {

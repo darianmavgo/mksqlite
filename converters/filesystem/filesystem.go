@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -121,7 +122,7 @@ func (c *FilesystemConverter) GetColumnTypes(tableName string) []string {
 }
 
 // ScanRows implements RowProvider
-func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	if tableName != FSTB {
 		return nil
 	}
@@ -134,6 +135,50 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 	// Context for cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// Create channels
+	// jobs channel carries directory paths to scan
+	jobs := make(chan string, 10000)
+	// results channel carries the data rows or errors
+	results := make(chan []interface{}, 10000)
+
+	// Cancellation mechanism: combine ctx and internal timeout
+	doneCh := make(chan struct{})
+
+	// Handle context cancellation
+	go func() {
+		// Wait for context cancel OR doneCh closed by internal logic
+		select {
+		case <-ctx.Done():
+			// External cancel
+			select {
+			case <-doneCh:
+			default:
+				close(doneCh)
+			}
+		case <-doneCh:
+			// Internal cancel/finish
+		}
+	}()
+
+	// Handle context cancellation
+	go func() {
+		// Wait for context cancel OR doneCh closed by internal logic
+		select {
+		case <-ctx.Done():
+			// External cancel
+			select {
+			case <-doneCh:
+			default:
+				close(doneCh)
+			}
+		case <-doneCh:
+			// Internal cancel/finish
+		}
+	}()
+
+	if c.timeout > 0 {
+		log.Printf("Filesystem scan idle timeout set to %v", c.timeout)
+	}
 
 	// WaitGroup for all active tasks (dirs and files)
 	var wg sync.WaitGroup
@@ -148,6 +193,30 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 	go func() {
 		defer close(consumerErr)
 
+		wd := common.NewWatchdog(c.timeout)
+		// Monitoring starts, will close doneCh if timeout reached
+		wdDone := wd.Start()
+
+		// If watchdog fires, we need to signal cancellation to the rest of the system
+		go func() {
+			select {
+			case <-wdDone:
+				log.Printf("Scan halted due to inactivity timeout (%v) after %d files.", c.timeout, rowCount)
+				// Close the main doneCh to signal workers to stop
+				// Check if already closed to avoid panic
+				select {
+				case <-doneCh:
+				default:
+					close(doneCh)
+				}
+			case <-doneCh:
+				// Main doneCh closed elsewhere (e.g. completion), stop watchdog
+				wd.Stop()
+			}
+		}()
+
+		defer wd.Stop()
+
 		for {
 			select {
 			case row, ok := <-results:
@@ -156,6 +225,24 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 					consumerErr <- nil
 					return
 				}
+					// Check if we were cancelled
+					select {
+					case <-ctx.Done():
+						consumerDone <- ctx.Err()
+					default:
+						consumerDone <- nil
+					}
+					return
+				}
+
+				// Reset idle timer
+				wd.Kick()
+
+				rowCount++
+				if time.Since(lastLog) > 2*time.Second {
+					log.Printf("Scanned %d files...", rowCount)
+					lastLog = time.Now()
+				}
 				if err := yield(row, nil); err != nil {
 					consumerErr <- err
 					cancel() // Stop producers
@@ -163,6 +250,18 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 				}
 			case <-ctx.Done():
 				consumerErr <- ctx.Err()
+			case <-wdDone:
+				// Watchdog fired.
+				consumerDone <- converters.ErrScanTimeout
+				return
+			case <-doneCh:
+				// This could be context cancellation or watchdog
+				select {
+				case <-ctx.Done():
+					consumerDone <- ctx.Err()
+				default:
+					consumerDone <- converters.ErrScanTimeout
+				}
 				return
 			}
 		}
@@ -309,7 +408,7 @@ func (c *FilesystemConverter) detectMimeType(path string) string {
 }
 
 // ConvertToSQL implements StreamConverter for filesystem directories
-func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
+func (c *FilesystemConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	// We need the path to walk the directory.
 	// It is stored in c.inputPath
 
@@ -333,6 +432,12 @@ func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
 
 	// Walk directory
 	err := filepath.WalkDir(inputPath, func(path string, d fs.DirEntry, err error) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if err != nil {
 			return err
 		}

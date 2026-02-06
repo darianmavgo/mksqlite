@@ -1,6 +1,7 @@
 package csv
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -42,7 +43,7 @@ Bob,25,Designer
 
 	// Check rows
 	var rows [][]interface{}
-	err = converter.ScanRows(CSVTB, func(row []interface{}, err error) error {
+	err = converter.ScanRows(context.Background(), CSVTB, func(row []interface{}, err error) error {
 		if err != nil {
 			return err
 		}
