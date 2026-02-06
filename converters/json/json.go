@@ -3,11 +3,13 @@ package json
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
@@ -20,7 +22,7 @@ func init() {
 type jsonDriver struct{}
 
 func (d *jsonDriver) Open(source io.Reader, config *common.ConversionConfig) (common.RowProvider, error) {
-	return NewJSONConverter(source)
+	return NewJSONConverterWithConfig(source, config)
 }
 
 // JSONConverter converts JSON files to SQLite tables
@@ -38,6 +40,7 @@ type JSONConverter struct {
 	isSeeker bool
 	seeker   io.ReadSeeker
 	objData  map[string]interface{} // If we load fully
+	timeout  time.Duration
 }
 
 type jsonTableInfo struct {
@@ -55,6 +58,11 @@ var _ common.StreamConverter = (*JSONConverter)(nil)
 
 // NewJSONConverter creates a new JSONConverter from an io.Reader.
 func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
+	return NewJSONConverterWithConfig(r, nil)
+}
+
+// NewJSONConverterWithConfig creates a new JSONConverter from an io.Reader with optional config.
+func NewJSONConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*JSONConverter, error) {
 	seeker, isSeeker := r.(io.ReadSeeker)
 
 	dec := json.NewDecoder(bufio.NewReaderSize(r, 65536))
@@ -70,11 +78,23 @@ func NewJSONConverter(r io.Reader) (*JSONConverter, error) {
 		return nil, fmt.Errorf("expected JSON object or array at root")
 	}
 
+	if config == nil {
+		config = &common.ConversionConfig{}
+	}
+
+	var timeout time.Duration
+	if config.ScanTimeout != "" {
+		if d, err := time.ParseDuration(config.ScanTimeout); err == nil {
+			timeout = d
+		}
+	}
+
 	c := &JSONConverter{
 		reader:   r,
 		isSeeker: isSeeker,
 		seeker:   seeker,
 		tables:   make(map[string]*jsonTableInfo),
+		timeout:  timeout,
 	}
 
 	if delim == '[' {
@@ -195,8 +215,123 @@ func (c *JSONConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
+// GetColumnTypes implements RowProvider
+func (c *JSONConverter) GetColumnTypes(tableName string) []string {
+	info, ok := c.tables[tableName]
+	if !ok {
+		return nil
+	}
+
+	colTypes := make([]string, len(info.headers))
+	for i := range colTypes {
+		colTypes[i] = "TEXT" // Default
+	}
+
+	// Helper to infer type from a Go value
+	inferType := func(val interface{}) string {
+		switch val.(type) {
+		case float64:
+			// JSON numbers are float64. Check if it's an integer.
+			// However, without inspecting the raw text or checking for decimals, it's hard.
+			// But usually if it has no decimals, we can say INTEGER?
+			// Or just REAL to be safe for JSON numbers?
+			// SQLite handles REAL well.
+			// Actually, let's treat it as REAL for safety unless we are sure.
+			// But common.ReferColumnTypes uses strconv.ParseInt.
+			// Let's use logic: if float matches integer value exactly.
+			f := val.(float64)
+			if f == float64(int64(f)) {
+				return "INTEGER"
+			}
+			return "REAL"
+		case string:
+			return "TEXT"
+		case bool:
+			return "INTEGER" // SQLite uses 0/1 for bool
+		case nil:
+			return "TEXT" // fallback
+		default:
+			// Arrays/Objects -> TEXT (JSON string)
+			return "TEXT"
+		}
+	}
+
+	// Strategy:
+	// 1. If streaming (arrayTable active) and tableName matches: use c.firstRow
+	// 2. If in-memory (objData active): scan sample rows
+
+	if c.arrayTable != "" && tableName == c.arrayTable {
+		if c.firstRow != nil {
+			for i, rawHeader := range info.rawHeaders {
+				if val, ok := c.firstRow[rawHeader]; ok {
+					colTypes[i] = inferType(val)
+				}
+			}
+		}
+		return colTypes
+	}
+
+	if c.objData != nil {
+		// In-memory
+		if arr, ok := c.objData[info.arrayKey].([]interface{}); ok {
+			// Scan up to 15 rows, focusing on 5-15
+			start := 0
+			end := 15
+			if len(arr) < end {
+				end = len(arr)
+			}
+
+			// We track types. If any row says TEXT, it becomes TEXT.
+			// If all are INT, it's INT. If INT and REAL, it's REAL.
+
+			// Initialize with "unknown" state?
+			// Let's iterate columns
+			for i, rawHeader := range info.rawHeaders {
+				isInt := true
+				isReal := true
+				hasData := false
+
+				for idx := start; idx < end; idx++ {
+					rowMap, ok := arr[idx].(map[string]interface{})
+					if !ok {
+						continue // Skip primitives for now or handle?
+					}
+
+					val, ok := rowMap[rawHeader]
+					if !ok || val == nil {
+						continue
+					}
+					hasData = true
+
+					t := inferType(val)
+					if t == "TEXT" {
+						isInt = false
+						isReal = false
+						break
+					}
+					if t == "REAL" {
+						isInt = false
+						// Keep isReal true
+					}
+					// If INTEGER, isInt stays true, isReal stays true (valid real)
+				}
+
+				if hasData {
+					if isInt {
+						colTypes[i] = "INTEGER"
+					} else if isReal {
+						colTypes[i] = "REAL"
+					}
+				}
+			}
+		}
+	}
+
+	return colTypes
+}
+
 // ScanRows implements RowProvider
-func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (c *JSONConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	info, ok := c.tables[tableName]
 	if !ok {
 		return nil
@@ -214,50 +349,119 @@ func (c *JSONConverter) ScanRows(tableName string, yield func([]interface{}, err
 		}
 
 		// Stream the rest
-		for c.decoder.More() {
-			t, err := c.decoder.Token()
-			if err != nil {
-				return fmt.Errorf("error reading token: %w", err)
-			}
+		type rowOrError struct {
+			row []interface{}
+			err error
+		}
+		rowsCh := make(chan rowOrError, 100)
+		cancelCh := make(chan struct{})
 
-			var rowMap map[string]json.RawMessage
-			if delim, ok := t.(json.Delim); ok && delim == '{' {
-				// Object optimization: stream keys
-				rowMap = make(map[string]json.RawMessage)
-				for c.decoder.More() {
-					keyToken, err := c.decoder.Token()
-					if err != nil {
-						return fmt.Errorf("error reading key: %w", err)
-					}
-					key, ok := keyToken.(string)
-					if !ok {
-						return fmt.Errorf("expected string key")
-					}
-					var val json.RawMessage
-					if err := c.decoder.Decode(&val); err != nil {
-						return fmt.Errorf("error decoding value for key %s: %w", key, err)
-					}
-					rowMap[key] = val
+		go func() {
+			defer close(rowsCh)
+			for c.decoder.More() {
+				// Check cancellation
+				select {
+				case <-cancelCh:
+					return
+				default:
 				}
-				// Consume closing '}'
-				if _, err := c.decoder.Token(); err != nil {
-					return fmt.Errorf("error reading closing brace: %w", err)
-				}
-			} else {
-				// Non-object: fallback
-				raw, err := reconstructRawJSON(t, c.decoder)
+
+				t, err := c.decoder.Token()
 				if err != nil {
-					return fmt.Errorf("error reconstructing raw json: %w", err)
+					select {
+					case rowsCh <- rowOrError{err: fmt.Errorf("error reading token: %w", err)}:
+					case <-cancelCh:
+					}
+					return
 				}
-				rowMap = map[string]json.RawMessage{"value": raw}
-			}
 
-			row := flattenRowRaw(rowMap, info.rawHeaders)
-			if err := yield(row, nil); err != nil {
-				return err
+				var rowMap map[string]json.RawMessage
+				if delim, ok := t.(json.Delim); ok && delim == '{' {
+					// Object optimization: stream keys
+					rowMap = make(map[string]json.RawMessage)
+					for c.decoder.More() {
+						keyToken, err := c.decoder.Token()
+						if err != nil {
+							select {
+							case rowsCh <- rowOrError{err: fmt.Errorf("error reading key: %w", err)}:
+							case <-cancelCh:
+							}
+							return
+						}
+						key, ok := keyToken.(string)
+						if !ok {
+							select {
+							case rowsCh <- rowOrError{err: fmt.Errorf("expected string key")}:
+							case <-cancelCh:
+							}
+							return
+						}
+						var val json.RawMessage
+						if err := c.decoder.Decode(&val); err != nil {
+							select {
+							case rowsCh <- rowOrError{err: fmt.Errorf("error decoding value for key %s: %w", key, err)}:
+							case <-cancelCh:
+							}
+							return
+						}
+						rowMap[key] = val
+					}
+					// Consume closing '}'
+					if _, err := c.decoder.Token(); err != nil {
+						select {
+						case rowsCh <- rowOrError{err: fmt.Errorf("error reading closing brace: %w", err)}:
+						case <-cancelCh:
+						}
+						return
+					}
+				} else {
+					// Non-object: fallback
+					raw, err := reconstructRawJSON(t, c.decoder)
+					if err != nil {
+						select {
+						case rowsCh <- rowOrError{err: fmt.Errorf("error reconstructing raw json: %w", err)}:
+						case <-cancelCh:
+						}
+						return
+					}
+					rowMap = map[string]json.RawMessage{"value": raw}
+				}
+
+				row := flattenRowRaw(rowMap, info.rawHeaders)
+				select {
+				case rowsCh <- rowOrError{row: row}:
+				case <-cancelCh:
+					return
+				}
+			}
+		}()
+
+		// Consumer
+		defer close(cancelCh)
+		wd := common.NewWatchdog(c.timeout)
+		wdDone := wd.Start()
+		defer wd.Stop()
+
+		for {
+			select {
+			case item, ok := <-rowsCh:
+				if !ok {
+					return nil
+				}
+				wd.Kick()
+
+				if item.err != nil {
+					return item.err
+				}
+				if err := yield(item.row, nil); err != nil {
+					return err
+				}
+			case <-wdDone:
+				return converters.ErrScanTimeout
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 		}
-		return nil
 	}
 
 	// Case 2: In-Memory Object
@@ -415,16 +619,17 @@ func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []int
 }
 
 // ConvertToSQL implements StreamConverter
-func (c *JSONConverter) ConvertToSQL(writer io.Writer) error {
-	bw := bufio.NewWriter(writer)
+func (c *JSONConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	for _, tableName := range c.GetTableNames() {
 		headers := c.GetHeaders(tableName)
-		createSQL := common.GenCreateTableSQL(tableName, headers)
-		if _, err := fmt.Fprintf(bw, "%s;\n\n", createSQL); err != nil {
+		colTypes := c.GetColumnTypes(tableName)
+
+		createSQL := common.GenCreateTableSQLWithTypes(tableName, headers, colTypes)
+		if _, err := fmt.Fprintf(writer, "%s;\n\n", createSQL); err != nil {
 			return err
 		}
 
-		err := c.ScanRows(tableName, func(row []interface{}, err error) error {
+		err := c.ScanRows(ctx, tableName, func(row []interface{}, err error) error {
 			if err != nil {
 				return err
 			}

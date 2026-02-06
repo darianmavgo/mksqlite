@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -132,7 +133,7 @@ func TestFilesystemConvertToSQL(t *testing.T) {
 	}
 	defer outputFile.Close()
 
-	err = converter.ConvertToSQL(outputFile)
+	err = converter.ConvertToSQL(context.Background(), outputFile)
 	if err != nil {
 		t.Fatalf("ConvertToSQL failed: %v", err)
 	}

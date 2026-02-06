@@ -34,6 +34,9 @@ func BenchmarkImportToSQLite(b *testing.B) {
 		rows: map[string][][]interface{}{
 			tableName: rows,
 		},
+		colTypes: map[string][]string{
+			tableName: []string{"TEXT", "TEXT", "TEXT", "TEXT", "TEXT"},
+		},
 	}
 
 	b.ResetTimer()

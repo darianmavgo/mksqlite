@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -36,6 +37,11 @@ func (d *filesystemDriver) Open(source io.Reader, config *common.ConversionConfi
 		if config.ResumePath != "" {
 			c.SetResumptionPath(config.ResumePath)
 		}
+		if config.ScanTimeout != "" {
+			if d, err := time.ParseDuration(config.ScanTimeout); err == nil {
+				c.SetTimeout(d)
+			}
+		}
 		return c, nil
 	}
 	// Fallback to trying to get the path from the source reader if it's a file
@@ -49,6 +55,7 @@ func (d *filesystemDriver) Open(source io.Reader, config *common.ConversionConfi
 type FilesystemConverter struct {
 	inputPath      string
 	resumptionPath string
+	timeout        time.Duration
 }
 
 // Ensure FilesystemConverter implements RowProvider
@@ -70,6 +77,7 @@ func NewFilesystemConverter(inputPath string) (*FilesystemConverter, error) {
 	return &FilesystemConverter{
 		inputPath:      inputPath,
 		resumptionPath: "",
+		timeout:        10 * time.Second,
 	}, nil
 }
 
@@ -77,6 +85,11 @@ func NewFilesystemConverter(inputPath string) (*FilesystemConverter, error) {
 // Any path strictly less than this (lexicographically) will be skipped.
 func (c *FilesystemConverter) SetResumptionPath(path string) {
 	c.resumptionPath = path
+}
+
+// SetTimeout sets the maximum duration for the scan.
+func (c *FilesystemConverter) SetTimeout(d time.Duration) {
+	c.timeout = d
 }
 
 // GetTableNames implements RowProvider
@@ -96,8 +109,20 @@ func (c *FilesystemConverter) GetHeaders(tableName string) []string {
 	return nil
 }
 
+// GetColumnTypes implements RowProvider
+func (c *FilesystemConverter) GetColumnTypes(tableName string) []string {
+	if tableName == FSTB {
+		return []string{
+			"TEXT", "TEXT", "INTEGER", "TEXT",
+			"TEXT", "TEXT", "TEXT",
+			"INTEGER", "TEXT",
+		}
+	}
+	return nil
+}
+
 // ScanRows implements RowProvider
-func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	if tableName != FSTB {
 		return nil
 	}
@@ -108,27 +133,145 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 
 	// Create channels
 	// jobs channel carries directory paths to scan
-	jobs := make(chan string, 1000)
+	jobs := make(chan string, 10000)
 	// results channel carries the data rows or errors
-	results := make(chan []interface{}, 1000)
+	results := make(chan []interface{}, 10000)
 
-	// Start workers
-	// We need a way to track active workers to know when we are done.
-	// Since the graph is discovered dynamically, standard "close jobs" pattern is tricky.
-	// We'll use a WaitGroup where we Add(1) for every directory we intend to scan
-	// and Done() when we finish scanning it.
+	// Cancellation mechanism: combine ctx and internal timeout
+	doneCh := make(chan struct{})
 
-	// Start result consumer
+	// Handle context cancellation
+	go func() {
+		// Wait for context cancel OR doneCh closed by internal logic
+		select {
+		case <-ctx.Done():
+			// External cancel
+			select {
+			case <-doneCh:
+			default:
+				close(doneCh)
+			}
+		case <-doneCh:
+			// Internal cancel/finish
+		}
+	}()
+
+	// Handle context cancellation
+	go func() {
+		// Wait for context cancel OR doneCh closed by internal logic
+		select {
+		case <-ctx.Done():
+			// External cancel
+			select {
+			case <-doneCh:
+			default:
+				close(doneCh)
+			}
+		case <-doneCh:
+			// Internal cancel/finish
+		}
+	}()
+
+	if c.timeout > 0 {
+		log.Printf("Filesystem scan idle timeout set to %v", c.timeout)
+	}
+
+	// Progress tracker
+	var rowCount int64
+	lastLog := time.Now()
+
+	// Consumer goroutine that writes to yield
 	consumerDone := make(chan error, 1)
 	go func() {
 		defer close(consumerDone)
-		for row := range results {
-			if err := yield(row, nil); err != nil {
-				consumerDone <- err
+
+		wd := common.NewWatchdog(c.timeout)
+		// Monitoring starts, will close doneCh if timeout reached
+		wdDone := wd.Start()
+
+		// If watchdog fires, we need to signal cancellation to the rest of the system
+		go func() {
+			select {
+			case <-wdDone:
+				log.Printf("Scan halted due to inactivity timeout (%v) after %d files.", c.timeout, rowCount)
+				// Close the main doneCh to signal workers to stop
+				// Check if already closed to avoid panic
+				select {
+				case <-doneCh:
+				default:
+					close(doneCh)
+				}
+			case <-doneCh:
+				// Main doneCh closed elsewhere (e.g. completion), stop watchdog
+				wd.Stop()
+			}
+		}()
+
+		defer wd.Stop()
+
+		for {
+			select {
+			case row, ok := <-results:
+				if !ok {
+					// Check if we were cancelled
+					select {
+					case <-ctx.Done():
+						consumerDone <- ctx.Err()
+					default:
+						consumerDone <- nil
+					}
+					return
+				}
+
+				// Reset idle timer
+				wd.Kick()
+
+				rowCount++
+				if time.Since(lastLog) > 2*time.Second {
+					log.Printf("Scanned %d files...", rowCount)
+					lastLog = time.Now()
+				}
+				if err := yield(row, nil); err != nil {
+					consumerDone <- err
+					return
+				}
+			case <-wdDone:
+				// Watchdog fired.
+				consumerDone <- converters.ErrScanTimeout
+				return
+			case <-doneCh:
+				// This could be context cancellation or watchdog
+				select {
+				case <-ctx.Done():
+					consumerDone <- ctx.Err()
+				default:
+					consumerDone <- converters.ErrScanTimeout
+				}
 				return
 			}
 		}
-		consumerDone <- nil
+	}()
+
+	// Initial job tracking (Must happen before starting cleanup monitor)
+	wg.Add(1)
+
+	// Cleanup Monitor
+	// This ensures that when everything stops (either by finish or timeout), we clean up
+	go func() {
+		wg.Wait()
+		// Only close results if we finished normally (doneCh not closed)
+		// Or if we know nobody is writing.
+		// If timeout happened, doneCh is closed. Workers might still be stuck.
+		// If we close results, stuck workers might panic if they blindly send.
+		// However, processFile selects on doneCh:
+		// case results <- row:
+		// case <-doneCh: return
+		// So if doneCh is closed, they stop sending.
+		// Is it safe to close results then? Yes, but only after we are sure they saw doneCh.
+		// wg.Wait() guarantees they are done (or saw doneCh and exited).
+		// So if wg.Wait returns, it is safe to close results.
+		close(results)
+		close(jobs)
 	}()
 
 	// Semaphore to limit number of concurrent directory reads/file stats
@@ -136,10 +279,19 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 
 	// Helper to safely add a job
 	addJob := func(path string) {
-		wg.Add(1)
-		go func() {
-			jobs <- path
-		}()
+		select {
+		case <-doneCh:
+			// Ensure we don't block if cancelled
+		default:
+			wg.Add(1)
+			go func() {
+				select {
+				case jobs <- path:
+				case <-doneCh:
+					wg.Done()
+				}
+			}()
+		}
 	}
 
 	// Retry loop for permission errors
@@ -147,13 +299,16 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 		log.Printf("Permission denied for %s. Waiting (max 10s)...", path)
 
 		// "Cap it at 10 seconds"
-		timeout := time.After(10 * time.Second)
+		retryTimeout := time.After(10 * time.Second)
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 
 		for {
 			select {
-			case <-timeout:
+			case <-doneCh:
+				wg.Done()
+				return
+			case <-retryTimeout:
 				log.Printf("Timeout waiting for permission on %s. Skipping.", path)
 				wg.Done() // Give up cleanly
 				return
@@ -165,6 +320,7 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 					// Success! Re-queue the job
 					log.Printf("Permission granted for %s. Resuming...", path)
 					addJob(path)
+					wg.Done() // Done with this retry task (addJob adds a new wg)
 					return
 				}
 				if !errors.Is(err, fs.ErrPermission) {
@@ -179,103 +335,124 @@ func (c *FilesystemConverter) ScanRows(tableName string, yield func([]interface{
 	}
 
 	// Worker logic
-
-	// Custom worker loop to handle the "retry logic" keeping WG count correct
-	// Actually, the simplest way to avoid the "WG 0 race" is to count the retry loop as part of the job.
-
-	// Real worker processor
 	startWorker := func() {
-		for path := range jobs {
-			// Acquire token
-			sem <- struct{}{}
+		for {
+			select {
+			case <-doneCh:
+				// Draining mode: consume remaining jobs to correct wg count
+				for {
+					select {
+					case _, ok := <-jobs:
+						if !ok {
+							return
+						}
+						wg.Done()
+					default:
+						return // Queue empty, exit
+					}
+				}
+			case path, ok := <-jobs:
+				if !ok {
+					return
+				}
 
-			// We handle directory read inside the worker to manage the "permission wait" logic
-			// without blocking a worker thread for long periods.
+				// Check cancellation before processing to convert to drainer
+				select {
+				case <-doneCh:
+					wg.Done()
+					continue
+				default:
+				}
 
-			// Try reading
-			entries, err := os.ReadDir(path)
-
-			// Handle Permission Error specifically
-			if err != nil && errors.Is(err, fs.ErrPermission) {
-				// Release token immediately so others can work
-				<-sem
-
-				// Spawn a waiter goroutine using the helper
-				go retryOnPermission(path)
-				continue
-			}
-
-			if err != nil {
-				// Log and ignore other errors
-				log.Printf("Error reading %s: %v", path, err)
-				<-sem
-				wg.Done()
-				continue
-			}
-
-			// Process valid entries
-			for _, d := range entries {
-				fullPath := filepath.Join(path, d.Name())
-
-				// Resumption check
-				if c.resumptionPath != "" && fullPath < c.resumptionPath {
+				// Acquire token
+				select {
+				case sem <- struct{}{}:
+				case <-doneCh:
+					wg.Done() // We took a job but couldn't process it
 					continue
 				}
 
-				if d.IsDir() {
-					wg.Add(1)
-					go func(p string) {
-						jobs <- p
-					}(fullPath)
-				} else {
-					c.processFile(fullPath, d, results)
-				}
-			}
+				// We handle directory read inside the worker to manage the "permission wait" logic
+				entries, err := os.ReadDir(path)
 
-			<-sem
-			wg.Done()
+				// Handle Permission Error specifically
+				if err != nil && errors.Is(err, fs.ErrPermission) {
+					// Release token immediately so others can work
+					<-sem
+
+					// Transfer the wg responsibility to the retry routine
+					go retryOnPermission(path)
+					continue
+				}
+
+				if err != nil {
+					<-sem
+					wg.Done()
+					continue
+				}
+
+				// Process valid entries
+				for _, d := range entries {
+					// Check cancellation periodically
+					select {
+					case <-doneCh:
+						<-sem
+						wg.Done()
+						// Loop will catch doneCh and enter drain mode
+						goto NextLoop
+					default:
+					}
+
+					fullPath := filepath.Join(path, d.Name())
+
+					// Resumption check
+					if c.resumptionPath != "" && fullPath < c.resumptionPath {
+						continue
+					}
+
+					if d.IsDir() {
+						select {
+						case <-doneCh:
+						default:
+							wg.Add(1)
+							go func(p string) {
+								select {
+								case jobs <- p:
+								case <-doneCh:
+									wg.Done()
+								}
+							}(fullPath)
+						}
+					} else {
+						c.processFile(fullPath, d, results, doneCh)
+					}
+				}
+
+				<-sem
+				wg.Done()
+			}
+		NextLoop:
 		}
 	}
 
-	// Start a fixed number of workers consuming from 'jobs'
-	// Wait, standard pattern with dynamic graph:
-	// We can't close 'jobs' until we know we are done.
-	// So we need a separate "Done" mechanism.
-	// Since we use WG to track "active jobs", we can have a goroutine that waits for WG
-	// and then closes jobs?
-	// If I close jobs, workers exit.
-
+	// Start workers
 	for i := 0; i < numWorkers; i++ {
 		go startWorker()
 	}
 
-	// Initial job
-	wg.Add(1)
-	jobs <- c.inputPath
+	// Submit initial job
+	select {
+	case jobs <- c.inputPath:
+	case <-doneCh:
+		wg.Done()
+	}
 
-	// Global timeout for the entire scan operation (as requested "kill all routines at 30s") is tricky here
-	// because ScanRows is supposed to run until done.
-	// The user likely meant "wait up to 30s for permissions" or "kill stuck routines".
-	// But let's strictly follow: "kill all routines at 30s but make sure all files scanned thus far made it".
-	// This implies a hard deadline on the entire operation if something gets stuck?
-	// Or maybe just for the permission waiter? "cap it at 10 seconds and kill all the routines at 30 seconds"
-	// Let's interpret as:
-	// 1. Permission retry caps at 10s.
-	// 2. If the whole thing runs for >30s??? No that would kill normal big scans.
-	// User probably means "kill the specific stuck routine".
-
-	// Wait for completion in background
-	go func() {
-		wg.Wait()
-		close(jobs)
-		close(results)
-	}()
-
-	// Wait logic is handled by consumerDone
+	// Main Wait Logic
+	// We only wait for consumerDone because timeout is handled inside consumer
 	return <-consumerDone
 }
 
-func (c *FilesystemConverter) processFile(path string, d fs.DirEntry, results chan<- []interface{}) {
+func (c *FilesystemConverter) processFile(path string, d fs.DirEntry, results chan<- []interface{}, doneCh <-chan struct{}) {
 	relPath, err := filepath.Rel(c.inputPath, path)
 	if err != nil {
 		relPath = path
@@ -303,7 +480,12 @@ func (c *FilesystemConverter) processFile(path string, d fs.DirEntry, results ch
 		isDir, mimeType,
 	}
 
-	results <- row
+	select {
+	case results <- row:
+	case <-doneCh:
+		// Cancelled
+		return
+	}
 }
 
 func (c *FilesystemConverter) detectMimeType(path string) string {
@@ -322,7 +504,7 @@ func (c *FilesystemConverter) detectMimeType(path string) string {
 }
 
 // ConvertToSQL implements StreamConverter for filesystem directories
-func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
+func (c *FilesystemConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	// We need the path to walk the directory.
 	// It is stored in c.inputPath
 
@@ -338,13 +520,20 @@ func (c *FilesystemConverter) ConvertToSQL(writer io.Writer) error {
 	}
 
 	// Write CREATE TABLE statement
-	createTableSQL := common.GenCreateTableSQL(FSTB, headers)
+	colTypes := c.GetColumnTypes(FSTB)
+	createTableSQL := common.GenCreateTableSQLWithTypes(FSTB, headers, colTypes)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
 
 	// Walk directory
 	err := filepath.WalkDir(inputPath, func(path string, d fs.DirEntry, err error) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if err != nil {
 			return err
 		}
