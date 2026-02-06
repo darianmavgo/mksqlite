@@ -30,3 +30,14 @@ func TestGenCompliantNamesDigits(t *testing.T) {
 		}
 	}
 }
+
+func TestGenCompliantNamesKeywords(t *testing.T) {
+	rawnames := []string{"group", "order", "select", "table", "where"}
+	expected := []string{"group_", "order_", "select_", "table_", "where_"}
+	clean := GenCompliantNames(rawnames, "cl")
+	for i, v := range clean {
+		if v != expected[i] {
+			t.Errorf("at index %d: got %s, want %s", i, v, expected[i])
+		}
+	}
+}
