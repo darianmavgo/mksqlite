@@ -173,7 +173,9 @@ Some text.
 					if err != nil {
 						return err
 					}
-					rows = append(rows, row)
+					rowCopy := make([]interface{}, len(row))
+					copy(rowCopy, row)
+					rows = append(rows, rowCopy)
 					return nil
 				})
 				if err != nil {

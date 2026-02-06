@@ -96,8 +96,13 @@ func (c *MarkdownConverter) ScanRows(ctx context.Context, tableName string, yiel
 	for i, name := range c.tableNames {
 		if name == tableName {
 			rows := c.tables[i].rows
+			var interfaceRow []interface{}
 			for _, row := range rows {
-				interfaceRow := make([]interface{}, len(row))
+				if cap(interfaceRow) < len(row) {
+					interfaceRow = make([]interface{}, len(row))
+				} else {
+					interfaceRow = interfaceRow[:len(row)]
+				}
 				for c, val := range row {
 					interfaceRow[c] = val
 				}
