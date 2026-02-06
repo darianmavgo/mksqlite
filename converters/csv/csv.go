@@ -320,6 +320,9 @@ func (c *CSVConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error
 		return fmt.Errorf("CSV reader is not initialized")
 	}
 
+	// Use buffered writer to reduce system calls
+	writer := bufio.NewWriter(w)
+	defer writer.Flush()
 	// Get column types
 	colTypes := c.GetColumnTypes(c.Config.TableName)
 
@@ -435,6 +438,6 @@ Done:
 	case err := <-errCh:
 		return err
 	default:
-		return nil
+		return writer.Flush()
 	}
 }
