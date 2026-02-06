@@ -1,6 +1,7 @@
 package excel
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -45,7 +46,7 @@ func BenchmarkExcelConvertToSQL(b *testing.B) {
 			b.Fatalf("Failed to truncate output file: %v", err)
 		}
 
-		err = converter.ConvertToSQL(outFile)
+		err = converter.ConvertToSQL(context.Background(), outFile)
 		if err != nil {
 			b.Fatalf("ConvertToSQL failed: %v", err)
 		}
