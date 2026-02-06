@@ -212,9 +212,17 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 			// Ensure row has the same number of columns as headers
 			if len(row) < len(headers) {
 				// Pad with nil (NULL)
-				newRow := make([]interface{}, len(headers))
-				copy(newRow, row)
-				row = newRow
+				targetLen := len(headers)
+				currentLen := len(row)
+				if cap(row) >= targetLen {
+					// Optimization: Reuse existing capacity
+					row = row[:targetLen]
+					clear(row[currentLen:])
+				} else {
+					newRow := make([]interface{}, targetLen)
+					copy(newRow, row)
+					row = newRow
+				}
 			} else if len(row) > len(headers) {
 				row = row[:len(headers)]
 			}
