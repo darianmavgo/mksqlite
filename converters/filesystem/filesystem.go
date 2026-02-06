@@ -127,10 +127,14 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 		return nil
 	}
 
-	// Configuration for concurrency
+	// Configuration
 	const numWorkers = 32
-	var wg sync.WaitGroup
+	// Semaphore to limit concurrency
+	sem := make(chan struct{}, numWorkers)
 
+	// Context for cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	// Create channels
 	// jobs channel carries directory paths to scan
 	jobs := make(chan string, 10000)
@@ -176,14 +180,18 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 		log.Printf("Filesystem scan idle timeout set to %v", c.timeout)
 	}
 
-	// Progress tracker
-	var rowCount int64
-	lastLog := time.Now()
+	// WaitGroup for all active tasks (dirs and files)
+	var wg sync.WaitGroup
 
-	// Consumer goroutine that writes to yield
-	consumerDone := make(chan error, 1)
+	// Results channel
+	results := make(chan []interface{}, 1000)
+
+	// Error channel for the consumer
+	consumerErr := make(chan error, 1)
+
+	// Consumer
 	go func() {
-		defer close(consumerDone)
+		defer close(consumerErr)
 
 		wd := common.NewWatchdog(c.timeout)
 		// Monitoring starts, will close doneCh if timeout reached
@@ -213,6 +221,10 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 			select {
 			case row, ok := <-results:
 				if !ok {
+					// Results closed, we are done
+					consumerErr <- nil
+					return
+				}
 					// Check if we were cancelled
 					select {
 					case <-ctx.Done():
@@ -232,9 +244,12 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 					lastLog = time.Now()
 				}
 				if err := yield(row, nil); err != nil {
-					consumerDone <- err
+					consumerErr <- err
+					cancel() // Stop producers
 					return
 				}
+			case <-ctx.Done():
+				consumerErr <- ctx.Err()
 			case <-wdDone:
 				// Watchdog fired.
 				consumerDone <- converters.ErrScanTimeout
@@ -252,207 +267,84 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 		}
 	}()
 
-	// Initial job tracking (Must happen before starting cleanup monitor)
+	// Start walking
 	wg.Add(1)
-
-	// Cleanup Monitor
-	// This ensures that when everything stops (either by finish or timeout), we clean up
-	go func() {
-		wg.Wait()
-		// Only close results if we finished normally (doneCh not closed)
-		// Or if we know nobody is writing.
-		// If timeout happened, doneCh is closed. Workers might still be stuck.
-		// If we close results, stuck workers might panic if they blindly send.
-		// However, processFile selects on doneCh:
-		// case results <- row:
-		// case <-doneCh: return
-		// So if doneCh is closed, they stop sending.
-		// Is it safe to close results then? Yes, but only after we are sure they saw doneCh.
-		// wg.Wait() guarantees they are done (or saw doneCh and exited).
-		// So if wg.Wait returns, it is safe to close results.
-		close(results)
-		close(jobs)
-	}()
-
-	// Semaphore to limit number of concurrent directory reads/file stats
-	sem := make(chan struct{}, numWorkers)
-
-	// Helper to safely add a job
-	addJob := func(path string) {
-		select {
-		case <-doneCh:
-			// Ensure we don't block if cancelled
-		default:
-			wg.Add(1)
-			go func() {
-				select {
-				case jobs <- path:
-				case <-doneCh:
-					wg.Done()
-				}
-			}()
-		}
-	}
-
-	// Retry loop for permission errors
-	retryOnPermission := func(path string) {
-		log.Printf("Permission denied for %s. Waiting (max 10s)...", path)
-
-		// "Cap it at 10 seconds"
-		retryTimeout := time.After(10 * time.Second)
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-doneCh:
-				wg.Done()
-				return
-			case <-retryTimeout:
-				log.Printf("Timeout waiting for permission on %s. Skipping.", path)
-				wg.Done() // Give up cleanly
-				return
-			case <-ticker.C:
-				// Try to open just to check permission
-				f, err := os.Open(path)
-				if err == nil {
-					f.Close()
-					// Success! Re-queue the job
-					log.Printf("Permission granted for %s. Resuming...", path)
-					addJob(path)
-					wg.Done() // Done with this retry task (addJob adds a new wg)
-					return
-				}
-				if !errors.Is(err, fs.ErrPermission) {
-					// Some other error, give up
-					log.Printf("Giving up on %s: %v", path, err)
-					wg.Done()
-					return
-				}
-				// Still permission denied, continue waiting
-			}
-		}
-	}
-
-	// Worker logic
-	startWorker := func() {
-		for {
-			select {
-			case <-doneCh:
-				// Draining mode: consume remaining jobs to correct wg count
-				for {
-					select {
-					case _, ok := <-jobs:
-						if !ok {
-							return
-						}
-						wg.Done()
-					default:
-						return // Queue empty, exit
-					}
-				}
-			case path, ok := <-jobs:
-				if !ok {
-					return
-				}
-
-				// Check cancellation before processing to convert to drainer
-				select {
-				case <-doneCh:
-					wg.Done()
-					continue
-				default:
-				}
-
-				// Acquire token
-				select {
-				case sem <- struct{}{}:
-				case <-doneCh:
-					wg.Done() // We took a job but couldn't process it
-					continue
-				}
-
-				// We handle directory read inside the worker to manage the "permission wait" logic
-				entries, err := os.ReadDir(path)
-
-				// Handle Permission Error specifically
-				if err != nil && errors.Is(err, fs.ErrPermission) {
-					// Release token immediately so others can work
-					<-sem
-
-					// Transfer the wg responsibility to the retry routine
-					go retryOnPermission(path)
-					continue
-				}
-
-				if err != nil {
-					<-sem
-					wg.Done()
-					continue
-				}
-
-				// Process valid entries
-				for _, d := range entries {
-					// Check cancellation periodically
-					select {
-					case <-doneCh:
-						<-sem
-						wg.Done()
-						// Loop will catch doneCh and enter drain mode
-						goto NextLoop
-					default:
-					}
-
-					fullPath := filepath.Join(path, d.Name())
-
-					// Resumption check
-					if c.resumptionPath != "" && fullPath < c.resumptionPath {
-						continue
-					}
-
-					if d.IsDir() {
-						select {
-						case <-doneCh:
-						default:
-							wg.Add(1)
-							go func(p string) {
-								select {
-								case jobs <- p:
-								case <-doneCh:
-									wg.Done()
-								}
-							}(fullPath)
-						}
-					} else {
-						c.processFile(fullPath, d, results, doneCh)
-					}
-				}
-
-				<-sem
-				wg.Done()
-			}
-		NextLoop:
-		}
-	}
-
-	// Start workers
-	for i := 0; i < numWorkers; i++ {
-		go startWorker()
-	}
-
-	// Submit initial job
 	select {
-	case jobs <- c.inputPath:
-	case <-doneCh:
+	case sem <- struct{}{}:
+		go c.processDir(ctx, c.inputPath, &wg, sem, results)
+	case <-ctx.Done():
+		// Context cancelled before we could start
 		wg.Done()
 	}
 
-	// Main Wait Logic
-	// We only wait for consumerDone because timeout is handled inside consumer
-	return <-consumerDone
+	// Monitor completion
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Wait for consumer
+	return <-consumerErr
 }
 
-func (c *FilesystemConverter) processFile(path string, d fs.DirEntry, results chan<- []interface{}, doneCh <-chan struct{}) {
+func (c *FilesystemConverter) processDir(ctx context.Context, dirPath string, wg *sync.WaitGroup, sem chan struct{}, results chan<- []interface{}) {
+	defer wg.Done()
+
+	// Read directory with timeout
+	// Default 30s timeout for directory listing
+	entries, err := runWithTimeout(30*time.Second, func() ([]fs.DirEntry, error) {
+		return os.ReadDir(dirPath)
+	})
+
+	// Release semaphore immediately after IO (acquired by caller)
+	<-sem
+
+	if err != nil {
+		log.Printf("Error reading directory %s: %v", dirPath, err)
+		return
+	}
+
+	for _, d := range entries {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		fullPath := filepath.Join(dirPath, d.Name())
+
+		// Resumption check
+		if c.resumptionPath != "" && fullPath < c.resumptionPath {
+			continue
+		}
+
+		if d.IsDir() {
+			// Backpressure for directories too
+			select {
+			case sem <- struct{}{}:
+				wg.Add(1)
+				go c.processDir(ctx, fullPath, wg, sem, results)
+			case <-ctx.Done():
+				return
+			}
+		} else {
+			// Backpressure: Acquire semaphore BEFORE spawning the goroutine.
+			// This prevents creating millions of goroutines for large directories.
+			select {
+			case sem <- struct{}{}:
+				wg.Add(1)
+				go c.processFile(ctx, fullPath, d, wg, sem, results)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+func (c *FilesystemConverter) processFile(ctx context.Context, path string, d fs.DirEntry, wg *sync.WaitGroup, sem chan struct{}, results chan<- []interface{}) {
+	defer wg.Done()
+	defer func() { <-sem }() // Release semaphore acquired by caller
+
 	relPath, err := filepath.Rel(c.inputPath, path)
 	if err != nil {
 		relPath = path
@@ -460,7 +352,6 @@ func (c *FilesystemConverter) processFile(path string, d fs.DirEntry, results ch
 
 	info, err := d.Info()
 	if err != nil {
-		// If we can't stat, skip
 		return
 	}
 
@@ -469,6 +360,8 @@ func (c *FilesystemConverter) processFile(path string, d fs.DirEntry, results ch
 	createTime := getCreateTime(info).Format(time.RFC3339)
 	permissions := info.Mode().String()
 	isDir := 0
+
+	// detectMimeType already has internal timeout/runWithTimeout logic now
 	mimeType := c.detectMimeType(path)
 
 	ext := filepath.Ext(path)
@@ -482,25 +375,36 @@ func (c *FilesystemConverter) processFile(path string, d fs.DirEntry, results ch
 
 	select {
 	case results <- row:
-	case <-doneCh:
-		// Cancelled
-		return
+	case <-ctx.Done():
 	}
 }
 
 func (c *FilesystemConverter) detectMimeType(path string) string {
-	f, err := os.Open(path)
+	// Use a short timeout for individual file reads to prevent hangs
+	timeout := 5 * time.Second
+	if c.timeout > 0 && c.timeout < timeout {
+		timeout = c.timeout
+	}
+
+	contentType, err := runWithTimeout(timeout, func() (string, error) {
+		f, err := os.Open(path)
+		if err != nil {
+			return "", err
+		}
+		defer f.Close()
+
+		buffer := make([]byte, 512)
+		n, err := f.Read(buffer)
+		if err != nil && err != io.EOF {
+			return "", err
+		}
+		return http.DetectContentType(buffer[:n]), nil
+	})
+
 	if err != nil {
 		return "application/octet-stream"
 	}
-	defer f.Close()
-
-	buffer := make([]byte, 512)
-	n, err := f.Read(buffer)
-	if err != nil && err != io.EOF {
-		return "application/octet-stream"
-	}
-	return http.DetectContentType(buffer[:n])
+	return contentType
 }
 
 // ConvertToSQL implements StreamConverter for filesystem directories
@@ -606,4 +510,27 @@ func (c *FilesystemConverter) ConvertToSQL(ctx context.Context, writer io.Writer
 	})
 
 	return err
+}
+
+// runWithTimeout executes fn and returns its result, or an error if timeout is exceeded.
+func runWithTimeout[T any](timeout time.Duration, fn func() (T, error)) (T, error) {
+	done := make(chan struct{})
+	var res T
+	var err error
+
+	go func() {
+		defer close(done)
+		res, err = fn()
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-done:
+		return res, err
+	case <-timer.C:
+		var zero T
+		return zero, fmt.Errorf("operation timed out after %v", timeout)
+	}
 }
