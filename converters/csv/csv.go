@@ -2,11 +2,13 @@ package csv
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
@@ -47,6 +49,7 @@ type CSVConverter struct {
 	bufferedRows [][]string
 	csvReader    *csv.Reader
 	Config       common.ConversionConfig
+	timeout      time.Duration
 }
 
 // Ensure CSVConverter implements RowProvider
@@ -136,11 +139,19 @@ func NewCSVConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*C
 	// Sanitize headers
 	sanitizedHeaders := common.GenColumnNames(headers)
 
+	var timeout time.Duration
+	if config.ScanTimeout != "" {
+		if d, err := time.ParseDuration(config.ScanTimeout); err == nil {
+			timeout = d
+		}
+	}
+
 	return &CSVConverter{
 		headers:      sanitizedHeaders,
 		bufferedRows: bufferedRows,
 		csvReader:    reader,
 		Config:       *config,
+		timeout:      timeout,
 	}, nil
 }
 
@@ -155,6 +166,15 @@ func (c *CSVConverter) GetHeaders(tableName string) []string {
 		return c.headers
 	}
 	return nil
+}
+
+// GetColumnTypes implements RowProvider
+func (c *CSVConverter) GetColumnTypes(tableName string) []string {
+	if tableName != c.Config.TableName {
+		return nil
+	}
+	// Use buffered rows for inference
+	return common.InferColumnTypes(c.bufferedRows, len(c.headers))
 }
 
 // padRow pads or truncates the row to match the target length.
@@ -173,7 +193,7 @@ func padRow(row []string, targetLen int) []string {
 }
 
 // ScanRows implements RowProvider using a worker pattern (pipelining) to improve streaming performance.
-func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (c *CSVConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	if tableName != c.Config.TableName {
 		return nil
 	}
@@ -192,10 +212,22 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 
 	// Channel to pipeline reading and processing
 	rowsCh := make(chan rowOrError, 100)
+	// Channel to signal cancellation to producer
+	cancelCh := make(chan struct{})
 
 	// Producer goroutine
 	go func() {
 		defer close(rowsCh)
+
+		// Helper to safely send
+		send := func(item rowOrError) bool {
+			select {
+			case rowsCh <- item:
+				return true
+			case <-cancelCh:
+				return false
+			}
+		}
 
 		// Send buffered rows first
 		for _, row := range c.bufferedRows {
@@ -211,7 +243,9 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 			for i, val := range row {
 				wrapper.values[i] = val
 			}
-			rowsCh <- rowOrError{row: wrapper.values, wrapper: wrapper}
+			if !send(rowOrError{row: wrapper.values, wrapper: wrapper}) {
+				return
+			}
 		}
 
 		for {
@@ -221,9 +255,10 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 					break
 				}
 				// Send error to consumer
-				rowsCh <- rowOrError{err: fmt.Errorf("failed to read CSV row: %w", err)}
-				// Continue reading next row
-				continue
+				send(rowOrError{err: fmt.Errorf("failed to read CSV row: %w", err)})
+				// Continue reading next row ?? Usually error is fatal or we stop.
+				// For CSV, Read() error usually stops.
+				return
 			}
 
 			// Ensure row has the same number of columns as headers
@@ -240,27 +275,47 @@ func (c *CSVConverter) ScanRows(tableName string, yield func([]interface{}, erro
 				wrapper.values[i] = val
 			}
 
-			rowsCh <- rowOrError{row: wrapper.values, wrapper: wrapper}
+			if !send(rowOrError{row: wrapper.values, wrapper: wrapper}) {
+				return
+			}
 		}
 	}()
 
 	// Consumer (Main Thread)
-	for item := range rowsCh {
-		err := yield(item.row, item.err)
-		if item.wrapper != nil {
-			rowWrapperPool.Put(item.wrapper)
-		}
-		if err != nil {
-			return err
+	// Signal cancellation when we exit
+	defer close(cancelCh)
+
+	wd := common.NewWatchdog(c.timeout)
+	wdDone := wd.Start()
+	defer wd.Stop()
+
+	for {
+		select {
+		case item, ok := <-rowsCh:
+			if !ok {
+				return nil
+			}
+
+			wd.Kick()
+
+			err := yield(item.row, item.err)
+			if item.wrapper != nil {
+				rowWrapperPool.Put(item.wrapper)
+			}
+			if err != nil {
+				return err
+			}
+		case <-wdDone:
+			return converters.ErrScanTimeout
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
-
-	return nil
 }
 
 // ConvertToSQL implements StreamConverter for CSV files (outputs SQL to writer).
 // It uses concurrency to pipeline reading and writing.
-func (c *CSVConverter) ConvertToSQL(w io.Writer) error {
+func (c *CSVConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	if c.csvReader == nil {
 		return fmt.Errorf("CSV reader is not initialized")
 	}
@@ -268,9 +323,11 @@ func (c *CSVConverter) ConvertToSQL(w io.Writer) error {
 	// Use buffered writer to reduce system calls
 	writer := bufio.NewWriter(w)
 	defer writer.Flush()
+	// Get column types
+	colTypes := c.GetColumnTypes(c.Config.TableName)
 
 	// Write CREATE TABLE statement
-	createTableSQL := common.GenCreateTableSQL(c.Config.TableName, c.headers)
+	createTableSQL := common.GenCreateTableSQLWithTypes(c.Config.TableName, c.headers, colTypes)
 	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
@@ -307,65 +364,74 @@ func (c *CSVConverter) ConvertToSQL(w io.Writer) error {
 	}()
 
 	// Consumer (Main Thread)
-	for row := range rowsCh {
-		if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", c.Config.TableName); err != nil {
-			return fmt.Errorf("failed to write INSERT start: %w", err)
-		}
-
-		// Write column names
-		for i, header := range c.headers {
-			if i > 0 {
-				if _, err := writer.Write([]byte(", ")); err != nil {
-					return fmt.Errorf("failed to write column separator: %w", err)
-				}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case row, ok := <-rowsCh:
+			if !ok {
+				goto Done
 			}
-			if _, err := fmt.Fprintf(writer, "%s", header); err != nil {
-				return fmt.Errorf("failed to write column name: %w", err)
-			}
-		}
-
-		if _, err := fmt.Fprintf(writer, ") VALUES ("); err != nil {
-			return fmt.Errorf("failed to write VALUES start: %w", err)
-		}
-
-		// Write values
-		for i, val := range row {
-			if i > 0 {
-				if _, err := io.WriteString(writer, ", "); err != nil {
-					return fmt.Errorf("failed to write value separator: %w", err)
-				}
+			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", c.Config.TableName); err != nil {
+				return fmt.Errorf("failed to write INSERT start: %w", err)
 			}
 
-			if _, err := io.WriteString(writer, "'"); err != nil {
-				return fmt.Errorf("failed to write value start: %w", err)
-			}
-
-			// Escape single quotes by doubling them
-			last := 0
-			for j := 0; j < len(val); j++ {
-				if val[j] == '\'' {
-					if _, err := io.WriteString(writer, val[last:j+1]); err != nil {
-						return fmt.Errorf("failed to write value chunk: %w", err)
+			// Write column names
+			for i, header := range c.headers {
+				if i > 0 {
+					if _, err := writer.Write([]byte(", ")); err != nil {
+						return fmt.Errorf("failed to write column separator: %w", err)
 					}
-					if _, err := io.WriteString(writer, "'"); err != nil {
-						return fmt.Errorf("failed to write escape quote: %w", err)
-					}
-					last = j + 1
+				}
+				if _, err := fmt.Fprintf(writer, "%s", header); err != nil {
+					return fmt.Errorf("failed to write column name: %w", err)
 				}
 			}
-			if _, err := io.WriteString(writer, val[last:]); err != nil {
-				return fmt.Errorf("failed to write value end: %w", err)
+
+			if _, err := fmt.Fprintf(writer, ") VALUES ("); err != nil {
+				return fmt.Errorf("failed to write VALUES start: %w", err)
 			}
 
-			if _, err := io.WriteString(writer, "'"); err != nil {
-				return fmt.Errorf("failed to write value end quote: %w", err)
-			}
-		}
+			// Write values
+			for i, val := range row {
+				if i > 0 {
+					if _, err := io.WriteString(writer, ", "); err != nil {
+						return fmt.Errorf("failed to write value separator: %w", err)
+					}
+				}
 
-		if _, err := writer.Write([]byte(");\n")); err != nil {
-			return fmt.Errorf("failed to write statement end: %w", err)
+				if _, err := io.WriteString(writer, "'"); err != nil {
+					return fmt.Errorf("failed to write value start: %w", err)
+				}
+
+				// Escape single quotes by doubling them
+				last := 0
+				for j := 0; j < len(val); j++ {
+					if val[j] == '\'' {
+						if _, err := io.WriteString(writer, val[last:j+1]); err != nil {
+							return fmt.Errorf("failed to write value chunk: %w", err)
+						}
+						if _, err := io.WriteString(writer, "'"); err != nil {
+							return fmt.Errorf("failed to write escape quote: %w", err)
+						}
+						last = j + 1
+					}
+				}
+				if _, err := io.WriteString(writer, val[last:]); err != nil {
+					return fmt.Errorf("failed to write value end: %w", err)
+				}
+
+				if _, err := io.WriteString(writer, "'"); err != nil {
+					return fmt.Errorf("failed to write value end quote: %w", err)
+				}
+			}
+
+			if _, err := writer.Write([]byte(");\n")); err != nil {
+				return fmt.Errorf("failed to write statement end: %w", err)
+			}
 		}
 	}
+Done:
 
 	// Check for producer error
 	select {

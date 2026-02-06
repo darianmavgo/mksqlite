@@ -12,6 +12,7 @@ type ConversionConfig struct {
 	Verbose                 bool   // Enable detailed logging
 	InputPath               string // Path to the input file or directory
 	ResumePath              string // Path to resume processing from (for filesystem)
+	ScanTimeout             string // Duration string (e.g. "20s") for timeout
 }
 
 // DetectDelimiter attempts to detect the delimiter from a raw line of text.

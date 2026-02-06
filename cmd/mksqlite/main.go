@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/darianmavgo/mksqlite/converters"
 	_ "github.com/darianmavgo/mksqlite/converters/all"
@@ -86,7 +89,7 @@ func FileToSQLite(inputPath, outputPath string, config *common.ConversionConfig,
 }
 
 // exportToSQL exports a file as SQL statements to writer
-func exportToSQL(inputPath string, writer io.Writer, config *common.ConversionConfig) error {
+func exportToSQL(ctx context.Context, inputPath string, writer io.Writer, config *common.ConversionConfig) error {
 	info, err := os.Stat(inputPath)
 	if err != nil {
 		return fmt.Errorf("failed to stat input path: %w", err)
@@ -123,10 +126,14 @@ func exportToSQL(inputPath string, writer io.Writer, config *common.ConversionCo
 		return fmt.Errorf("converter for %s does not support SQL export", driverName)
 	}
 
-	return streamConv.ConvertToSQL(writer)
+	return streamConv.ConvertToSQL(ctx, writer)
 }
 
 func main() {
+	// Setup global context for cancellation
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	args := os.Args[1:]
 	logMode := false
 
@@ -180,7 +187,7 @@ func main() {
 			writer = os.Stdout
 		}
 
-		err := exportToSQL(inputPath, writer, nil)
+		err := exportToSQL(ctx, inputPath, writer, nil)
 		if err != nil {
 			fmt.Printf("Error exporting SQL: %v\n", err)
 			os.Exit(1)

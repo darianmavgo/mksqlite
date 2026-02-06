@@ -2,6 +2,7 @@ package csv
 
 import (
 	"bytes"
+	"context"
 	"testing"
 )
 
@@ -26,7 +27,7 @@ func BenchmarkScanRows(b *testing.B) {
 			b.Fatalf("NewCSVConverter failed: %v", err)
 		}
 
-		err = converter.ScanRows(CSVTB, func(row []interface{}, err error) error {
+		err = converter.ScanRows(context.Background(), CSVTB, func(row []interface{}, err error) error {
 			if err != nil {
 				return err
 			}

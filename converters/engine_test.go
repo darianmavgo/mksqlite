@@ -2,6 +2,7 @@ package converters
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ type MockProvider struct {
 	tableNames []string
 	headers    map[string][]string
 	rows       map[string][][]interface{}
+	colTypes   map[string][]string
 }
 
 // Ensure MockProvider implements common.RowProvider
@@ -31,12 +33,27 @@ func (m *MockProvider) GetHeaders(tableName string) []string {
 	return m.headers[tableName]
 }
 
-func (m *MockProvider) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (m *MockProvider) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	rows := m.rows[tableName]
 	for _, row := range rows {
 		if err := yield(row, nil); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (m *MockProvider) GetColumnTypes(tableName string) []string {
+	if types, ok := m.colTypes[tableName]; ok {
+		return types
+	}
+	// Fallback to all TEXT if not specified
+	if headers, ok := m.headers[tableName]; ok {
+		types := make([]string, len(headers))
+		for i := range types {
+			types[i] = "TEXT"
+		}
+		return types
 	}
 	return nil
 }
@@ -119,7 +136,7 @@ type ErrorMockProvider struct {
 	rowErrors map[string]map[int]error
 }
 
-func (m *ErrorMockProvider) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (m *ErrorMockProvider) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	rows := m.rows[tableName]
 	for i, row := range rows {
 		var rowErr error
