@@ -92,13 +92,22 @@ func (c *HTMLConverter) GetColumnTypes(tableName string) []string {
 	return nil
 }
 
-// ScanRows implements RowProvider
+// ScanRows implements RowProvider.
+// Note: The slice passed to the yield function is reused across iterations.
+// The consumer must copy the data if retention is required.
 func (c *HTMLConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	for i, name := range c.tableNames {
 		if name == tableName {
 			rows := c.tables[i].rows
+			var interfaceRow []interface{}
 			for _, row := range rows {
-				interfaceRow := make([]interface{}, len(row))
+				// Optimization: Reuse slice to avoid allocation per row
+				if cap(interfaceRow) >= len(row) {
+					interfaceRow = interfaceRow[:len(row)]
+				} else {
+					interfaceRow = make([]interface{}, len(row))
+				}
+
 				for c, val := range row {
 					interfaceRow[c] = val
 				}
