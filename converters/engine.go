@@ -2,6 +2,7 @@
 package converters
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 )
 
 var ErrInterrupted = errors.New("operation interrupted by user")
+var ErrScanTimeout = errors.New("scan timed out")
 
 var (
 	// BatchSize defines the number of rows to insert before committing a transaction.
@@ -139,7 +141,9 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 		if opts != nil && opts.Verbose {
 			log.Printf("[MKSQLITE] Creating table: %s with headers: %v", tableName, headers)
 		}
-		createTableSQL := common.GenCreateTableSQL(tableName, headers)
+
+		colTypes := provider.GetColumnTypes(tableName)
+		createTableSQL := common.GenCreateTableSQLWithTypes(tableName, headers, colTypes)
 		_, err := db.Exec(createTableSQL)
 		if err != nil {
 			return fmt.Errorf("failed to create table %s: %w", tableName, err)
@@ -184,20 +188,12 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 
 		rowCount := 0
 
-		// Setup signal handling for this table's processing
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(sigChan)
+		// Setup signal handling context
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
 
 		// Insert rows using streaming ScanRows
-		err = provider.ScanRows(tableName, func(row []interface{}, rowErr error) error {
-			// Check for interruption non-blocking
-			select {
-			case <-sigChan:
-				return ErrInterrupted
-			default:
-			}
-
+		err = provider.ScanRows(ctx, tableName, func(row []interface{}, rowErr error) error {
 			if rowErr != nil {
 				if logErrors {
 					// Log provider error
@@ -262,13 +258,13 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 		}
 
 		if err != nil {
-			if errors.Is(err, ErrInterrupted) {
+			if errors.Is(err, ErrInterrupted) || errors.Is(err, ErrScanTimeout) {
 				if opts != nil && opts.Verbose {
-					log.Printf("[MKSQLITE] Interrupted! Committing partial transaction for table %s...", tableName)
+					log.Printf("[MKSQLITE] Stopped (%v). Committing partial transaction for table %s...", err, tableName)
 				}
 				// Commit what we have
 				if commitErr := tx.Commit(); commitErr != nil {
-					log.Printf("[MKSQLITE] Failed to commit on interrupt: %v", commitErr)
+					log.Printf("[MKSQLITE] Failed to commit on stop: %v", commitErr)
 				}
 				return err
 			}

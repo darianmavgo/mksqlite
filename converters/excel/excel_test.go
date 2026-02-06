@@ -1,6 +1,7 @@
 package excel
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -127,7 +128,7 @@ func TestExcelConvertToSQL(t *testing.T) {
 	}
 	defer outFile.Close()
 
-	err = converter.ConvertToSQL(outFile)
+	err = converter.ConvertToSQL(context.Background(), outFile)
 	if err != nil {
 		t.Fatalf("ConvertToSQL failed: %v", err)
 	}

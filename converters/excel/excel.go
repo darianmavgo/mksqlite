@@ -2,11 +2,13 @@ package excel
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
+	"strings"
+
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
-	"strings"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -133,8 +135,68 @@ func (e *ExcelConverter) GetHeaders(tableName string) []string {
 	return e.headers[tableName]
 }
 
+// GetColumnTypes implements RowProvider
+func (e *ExcelConverter) GetColumnTypes(tableName string) []string {
+	sheetName, ok := e.sheetMap[tableName]
+	if !ok {
+		return nil
+	}
+	headers, ok := e.headers[tableName]
+	if !ok {
+		return nil
+	}
+
+	rows, err := e.file.Rows(sheetName)
+	if err != nil {
+		// Fallback to TEXT if we can't read
+		return common.GenColumnTypes(headers)
+	}
+	defer rows.Close()
+
+	// Skip to header row
+	headerIdx := e.headerRowIndex[tableName]
+	// We want rows 5-15 from data start. Data starts after header.
+	// So skip headerIdx + 1 (header row itself)
+	// Then skip 5 more? Or does user mean absolute 5-15?
+	// "rows 5 through 15". Usually implies data rows.
+	// Let's assume data rows 5-15 (0-indexed data).
+	// So we skip headerIdx + 1 + 5.
+	skipCount := headerIdx + 1
+
+	// Read a batch of rows for inference
+	// We'll read up to 20 rows to capture the 5-15 range mentioned, or just read the first few batches
+	// common.InferColumnTypes now handles the 5-15 logic internally if we pass it enough rows.
+	// So let's just pass it the first 20 rows of DATA.
+
+	for i := 0; i < skipCount; i++ {
+		if !rows.Next() {
+			return common.GenColumnTypes(headers)
+		}
+		if _, err := rows.Columns(); err != nil {
+			return common.GenColumnTypes(headers)
+		}
+	}
+
+	var scannedRows [][]string
+	for i := 0; i < 20 && rows.Next(); i++ {
+		cols, err := rows.Columns()
+		if err != nil {
+			break
+		}
+		// Pad cols if necessary
+		if len(cols) < len(headers) {
+			padded := make([]string, len(headers))
+			copy(padded, cols)
+			cols = padded
+		}
+		scannedRows = append(scannedRows, cols)
+	}
+
+	return common.InferColumnTypes(scannedRows, len(headers))
+}
+
 // ScanRows implements RowProvider
-func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}, error) error) error {
+func (e *ExcelConverter) ScanRows(ctx context.Context, tableName string, yield func([]interface{}, error) error) error {
 	sheetName, ok := e.sheetMap[tableName]
 	if !ok {
 		return nil // Should not happen if GetTableNames is correct
@@ -172,6 +234,13 @@ func (e *ExcelConverter) ScanRows(tableName string, yield func([]interface{}, er
 		if err := yield(interfaceRow, nil); err != nil {
 			return err
 		}
+
+		// Check cancel
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 
 	return nil
@@ -186,7 +255,7 @@ func (e *ExcelConverter) Close() error {
 }
 
 // ConvertToSQL implements StreamConverter for Excel files (outputs SQL to writer)
-func (e *ExcelConverter) ConvertToSQL(writer io.Writer) error {
+func (e *ExcelConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	if e.file == nil {
 		return fmt.Errorf("ExcelConverter not initialized")
 	}
@@ -199,13 +268,16 @@ func (e *ExcelConverter) ConvertToSQL(writer io.Writer) error {
 			continue // Skip empty tables
 		}
 
+		// Get column types
+		colTypes := e.GetColumnTypes(tableName)
+
 		// Write CREATE TABLE statement
-		createTableSQL := common.GenCreateTableSQL(tableName, headers)
-		if _, err := fmt.Fprintf(bw, "%s;\n\n", createTableSQL); err != nil {
+		createTableSQL := common.GenCreateTableSQLWithTypes(tableName, headers, colTypes)
+		if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
 			return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 		}
 
-		err := e.ScanRows(tableName, func(row []interface{}, err error) error {
+		err := e.ScanRows(ctx, tableName, func(row []interface{}, err error) error {
 			if err != nil {
 				return err
 			}

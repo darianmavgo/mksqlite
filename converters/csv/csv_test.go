@@ -2,6 +2,7 @@ package csv
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -167,7 +168,7 @@ func TestCSVConvertToSQL(t *testing.T) {
 	}
 	defer outFile.Close()
 
-	err = converter.ConvertToSQL(outFile)
+	err = converter.ConvertToSQL(context.Background(), outFile)
 	if err != nil {
 		t.Fatalf("ConvertToSQL failed: %v", err)
 	}
@@ -206,7 +207,7 @@ func TestCSVParseCSV(t *testing.T) {
 	}
 
 	var rows [][]interface{}
-	err = converter.ScanRows(CSVTB, func(row []interface{}, err error) error {
+	err = converter.ScanRows(context.Background(), CSVTB, func(row []interface{}, err error) error {
 		if err != nil {
 			return err
 		}
@@ -244,7 +245,7 @@ func TestEscapingLogic(t *testing.T) {
 	}
 
 	var output bytes.Buffer // bytes is not imported in csv_test.go yet, need to check
-	err = converter.ConvertToSQL(&output)
+	err = converter.ConvertToSQL(context.Background(), &output)
 	if err != nil {
 		t.Fatalf("ConvertToSQL failed: %v", err)
 	}

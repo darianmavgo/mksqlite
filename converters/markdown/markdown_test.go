@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
@@ -168,7 +169,7 @@ Some text.
 				}
 
 				var rows [][]interface{}
-				err := conv.ScanRows(tableName, func(row []interface{}, err error) error {
+				err := conv.ScanRows(context.Background(), tableName, func(row []interface{}, err error) error {
 					if err != nil {
 						return err
 					}
@@ -221,7 +222,7 @@ func TestConvertToSQL(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err = conv.ConvertToSQL(&buf)
+	err = conv.ConvertToSQL(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("ConvertToSQL failed: %v", err)
 	}
