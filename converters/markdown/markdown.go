@@ -183,14 +183,33 @@ func writeTableSQL(ctx context.Context, tableName string, headers []string, colT
 
 		for i, val := range currentRow {
 			if i > 0 {
-				if _, err := writer.Write([]byte(", ")); err != nil {
+				if _, err := io.WriteString(writer, ", "); err != nil {
 					return fmt.Errorf("failed to write value separator: %w", err)
 				}
 			}
-			// Escape single quotes for SQL
-			escapedVal := strings.ReplaceAll(val, "'", "''")
-			if _, err := fmt.Fprintf(writer, "'%s'", escapedVal); err != nil {
-				return fmt.Errorf("failed to write value: %w", err)
+
+			if _, err := io.WriteString(writer, "'"); err != nil {
+				return fmt.Errorf("failed to write start quote: %w", err)
+			}
+
+			last := 0
+			for j := 0; j < len(val); j++ {
+				if val[j] == '\'' {
+					if _, err := io.WriteString(writer, val[last:j]); err != nil {
+						return fmt.Errorf("failed to write value chunk: %w", err)
+					}
+					if _, err := io.WriteString(writer, "''"); err != nil {
+						return fmt.Errorf("failed to write escaped quote: %w", err)
+					}
+					last = j + 1
+				}
+			}
+			if _, err := io.WriteString(writer, val[last:]); err != nil {
+				return fmt.Errorf("failed to write remaining value: %w", err)
+			}
+
+			if _, err := io.WriteString(writer, "'"); err != nil {
+				return fmt.Errorf("failed to write end quote: %w", err)
 			}
 		}
 
