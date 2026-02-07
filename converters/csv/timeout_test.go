@@ -32,6 +32,7 @@ func TestCSVTimeout(t *testing.T) {
 	config := &common.ConversionConfig{
 		TableName:   "timeout_test",
 		ScanTimeout: "100ms", // Should timeout before reader returns
+		Delimiter:   ',',     // Avoid Peek which blocks on incomplete input
 	}
 
 	c, err := NewCSVConverterWithConfig(r, config)

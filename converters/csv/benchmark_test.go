@@ -63,7 +63,7 @@ func BenchmarkConvertToSQL(b *testing.B) {
 		}
 
 		var out bytes.Buffer
-		err = converter.ConvertToSQL(&out)
+		err = converter.ConvertToSQL(context.Background(), &out)
 		if err != nil {
 			b.Fatalf("ConvertToSQL failed: %v", err)
 		}

@@ -620,12 +620,13 @@ func flattenRowRaw(rowMap map[string]json.RawMessage, rawHeaders []string) []int
 
 // ConvertToSQL implements StreamConverter
 func (c *JSONConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
+	bw := bufio.NewWriter(writer)
 	for _, tableName := range c.GetTableNames() {
 		headers := c.GetHeaders(tableName)
 		colTypes := c.GetColumnTypes(tableName)
 
 		createSQL := common.GenCreateTableSQLWithTypes(tableName, headers, colTypes)
-		if _, err := fmt.Fprintf(writer, "%s;\n\n", createSQL); err != nil {
+		if _, err := fmt.Fprintf(bw, "%s;\n\n", createSQL); err != nil {
 			return err
 		}
 

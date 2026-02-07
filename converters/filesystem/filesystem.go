@@ -2,7 +2,6 @@ package filesystem
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -133,11 +132,11 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 	sem := make(chan struct{}, numWorkers)
 
 	// Context for cancellation
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// Create channels
 	// jobs channel carries directory paths to scan
-	jobs := make(chan string, 10000)
+
 	// results channel carries the data rows or errors
 	results := make(chan []interface{}, 10000)
 
@@ -184,7 +183,6 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 	var wg sync.WaitGroup
 
 	// Results channel
-	results := make(chan []interface{}, 1000)
 
 	// Error channel for the consumer
 	consumerErr := make(chan error, 1)
@@ -192,6 +190,8 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 	// Consumer
 	go func() {
 		defer close(consumerErr)
+		var rowCount int64
+		lastLog := time.Now()
 
 		wd := common.NewWatchdog(c.timeout)
 		// Monitoring starts, will close doneCh if timeout reached
@@ -225,15 +225,6 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 					consumerErr <- nil
 					return
 				}
-					// Check if we were cancelled
-					select {
-					case <-ctx.Done():
-						consumerDone <- ctx.Err()
-					default:
-						consumerDone <- nil
-					}
-					return
-				}
 
 				// Reset idle timer
 				wd.Kick()
@@ -250,17 +241,18 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 				}
 			case <-ctx.Done():
 				consumerErr <- ctx.Err()
+				return
 			case <-wdDone:
 				// Watchdog fired.
-				consumerDone <- converters.ErrScanTimeout
+				consumerErr <- converters.ErrScanTimeout
 				return
 			case <-doneCh:
 				// This could be context cancellation or watchdog
 				select {
 				case <-ctx.Done():
-					consumerDone <- ctx.Err()
+					consumerErr <- ctx.Err()
 				default:
-					consumerDone <- converters.ErrScanTimeout
+					consumerErr <- converters.ErrScanTimeout
 				}
 				return
 			}

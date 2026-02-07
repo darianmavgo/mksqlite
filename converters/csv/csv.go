@@ -321,8 +321,10 @@ func (c *CSVConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error
 	}
 
 	// Use buffered writer to reduce system calls
-	writer := bufio.NewWriter(w)
-	defer writer.Flush()
+	// Use buffered writer to reduce system calls
+	bw := bufio.NewWriter(writer)
+	defer bw.Flush()
+	writer = bw
 	// Get column types
 	colTypes := c.GetColumnTypes(c.Config.TableName)
 
@@ -438,6 +440,6 @@ Done:
 	case err := <-errCh:
 		return err
 	default:
-		return writer.Flush()
+		return bw.Flush()
 	}
 }

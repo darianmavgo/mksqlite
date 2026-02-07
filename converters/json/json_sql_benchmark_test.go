@@ -1,6 +1,7 @@
 package json
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func BenchmarkJSONConvertToSQL(b *testing.B) {
 		}
 		b.StartTimer()
 
-		err = conv.ConvertToSQL(f)
+		err = conv.ConvertToSQL(context.Background(), f)
 		if err != nil {
 			f.Close()
 			b.Fatalf("ConvertToSQL failed: %v", err)
