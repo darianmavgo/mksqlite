@@ -38,7 +38,6 @@ func init() {
 
 The rules for column names and table names are so similar I made one function
 that taxes a prefix as input. lower case, snake case, strip disallowed characters.
-Still need to add logic dodging sqlite keywords.
 If a standardized name results in an  unusable result then the name is {prefix}{idx}
 */
 func GenCompliantNames(rawnames []string, prefix string) []string {
@@ -50,9 +49,9 @@ func GenCompliantNames(rawnames []string, prefix string) []string {
 		item = reg.ReplaceAllString(item, "")
 		item = space.ReplaceAllString(item, "_")
 		item = strings.ToLower(item)
-		// remove keywords
+		// dodging keywords
 		if _, ok := keywordsMap[item]; ok {
-			item = fmt.Sprintf("%s%d", prefix, idx)
+			item = item + "_"
 		}
 
 		// If stripping non-compliant chars leaves us with nothing, give it a default index name
