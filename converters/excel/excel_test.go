@@ -150,4 +150,10 @@ func TestExcelConvertToSQL(t *testing.T) {
 	if !strings.Contains(sqlStr, "INSERT INTO") {
 		t.Error("Expected INSERT INTO in SQL output")
 	}
+	if !strings.Contains(sqlStr, "BEGIN TRANSACTION") {
+		t.Error("Expected BEGIN TRANSACTION in SQL output")
+	}
+	if !strings.Contains(sqlStr, "COMMIT") {
+		t.Error("Expected COMMIT in SQL output")
+	}
 }
