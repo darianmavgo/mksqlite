@@ -422,6 +422,10 @@ func (c *FilesystemConverter) ConvertToSQL(ctx context.Context, writer io.Writer
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
 
+	if _, err := io.WriteString(writer, "BEGIN TRANSACTION;\n"); err != nil {
+		return fmt.Errorf("failed to write BEGIN TRANSACTION: %w", err)
+	}
+
 	// Walk directory
 	err := filepath.WalkDir(inputPath, func(path string, d fs.DirEntry, err error) error {
 		select {
@@ -501,7 +505,15 @@ func (c *FilesystemConverter) ConvertToSQL(ctx context.Context, writer io.Writer
 		return nil
 	})
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.WriteString(writer, "COMMIT;\n"); err != nil {
+		return fmt.Errorf("failed to write COMMIT: %w", err)
+	}
+
+	return nil
 }
 
 // runWithTimeout executes fn and returns its result, or an error if timeout is exceeded.
