@@ -334,6 +334,10 @@ func (c *CSVConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error
 		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
 	}
 
+	if _, err := io.WriteString(writer, "BEGIN TRANSACTION;\n"); err != nil {
+		return fmt.Errorf("failed to write BEGIN TRANSACTION: %w", err)
+	}
+
 	// Channel to pipeline reading and writing
 	rowsCh := make(chan []string, 100)
 	errCh := make(chan error, 1)
@@ -440,6 +444,9 @@ Done:
 	case err := <-errCh:
 		return err
 	default:
+		if _, err := io.WriteString(writer, "COMMIT;\n"); err != nil {
+			return fmt.Errorf("failed to write COMMIT: %w", err)
+		}
 		return bw.Flush()
 	}
 }
