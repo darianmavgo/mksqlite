@@ -10,6 +10,10 @@ A robust library and command-line tool designed to convert various file formats 
     *   **CSV**: Converts delimiters, handles headers, sanitizes column names.
     *   **Excel (.xlsx, .xls)**: Converts each sheet into a separate table.
     *   **HTML**: Extracts data from standard HTML `<table>` elements.
+    *   **JSON**: Converts JSON data into structured tables.
+    *   **Markdown (.md)**: Extracts data from Markdown tables.
+    *   **Text (.txt)**: Parses text files into tables.
+    *   **ZIP (.zip)**: Processes formats contained within ZIP archives.
     *   **Filesystem**: Recursively crawls directories to create a metadata index (`path`, `size`, etc.) in SQLite.
 *   **Dual Output Modes**:
     *   **SQLite Database**: Direct binary creation of `.db` files.
@@ -31,15 +35,24 @@ A robust library and command-line tool designed to convert various file formats 
 
 ### Create a Database
 ```bash
-# Convert a CSV to a SQLite DB
-mksqlite data.csv data.db
+# Convert a CSV to a SQLite DB (output DB is optional, defaults to data.csv.db)
+mksqlite data.csv [data.db]
 
 # Index a directory
 mksqlite ./documents/ index.db
+
+# Convert with error logging
+mksqlite --log data.csv
+
+# Resume an interrupted directory conversion from a specific path
+mksqlite --resume-path ./documents/some/file.txt ./documents/ index.db
 ```
 
 ### Generate SQL
 ```bash
-# Pipe SQL output
+# Pipe SQL output to stdout
 mksqlite --sql data.csv > dump.sql
+
+# Export directly to an output file
+mksqlite --sql data.csv dump.sql
 ```
