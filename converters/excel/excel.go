@@ -273,8 +273,12 @@ func (e *ExcelConverter) ConvertToSQL(ctx context.Context, writer io.Writer) err
 
 		// Write CREATE TABLE statement
 		createTableSQL := common.GenCreateTableSQLWithTypes(tableName, headers, colTypes)
-		if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
+		if _, err := fmt.Fprintf(bw, "%s;\n\n", createTableSQL); err != nil {
 			return fmt.Errorf("failed to write CREATE TABLE: %w", err)
+		}
+
+		if _, err := bw.WriteString("BEGIN TRANSACTION;\n"); err != nil {
+			return fmt.Errorf("failed to write BEGIN TRANSACTION: %w", err)
 		}
 
 		err := e.ScanRows(ctx, tableName, func(row []interface{}, err error) error {
@@ -333,6 +337,10 @@ func (e *ExcelConverter) ConvertToSQL(ctx context.Context, writer io.Writer) err
 
 		if err != nil {
 			return err
+		}
+
+		if _, err := bw.WriteString("COMMIT;\n"); err != nil {
+			return fmt.Errorf("failed to write COMMIT: %w", err)
 		}
 
 		if _, err := bw.Write([]byte("\n")); err != nil {
