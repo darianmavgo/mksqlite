@@ -154,4 +154,10 @@ func TestFilesystemConvertToSQL(t *testing.T) {
 	if !strings.Contains(sqlStr, "test.txt") {
 		t.Error("Expected filename in output")
 	}
+	if !strings.Contains(sqlStr, "BEGIN TRANSACTION;") {
+		t.Error("Expected BEGIN TRANSACTION in output")
+	}
+	if !strings.Contains(sqlStr, "COMMIT;") {
+		t.Error("Expected COMMIT in output")
+	}
 }
