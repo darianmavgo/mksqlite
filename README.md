@@ -7,6 +7,7 @@ A robust library and command-line tool designed to convert various file formats 
 ## Features Supported
 
 *   **Multi-Format Conversion**:
+    *   **PDF (.pdf)**: Automatically extracts tables with spatial layout analysis and multi-line row aggregation.
     *   **CSV**: Converts delimiters, handles headers, sanitizes column names.
     *   **Excel (.xlsx, .xls)**: Converts each sheet into a separate table.
     *   **HTML**: Extracts data from standard HTML `<table>` elements.
@@ -20,6 +21,20 @@ A robust library and command-line tool designed to convert various file formats 
     *   **SQL Dump**: Generates `CREATE TABLE` and `INSERT` statements to stdout (great for piping).
 *   **Flexible Usage**: Available as both a standalone CLI tool and a Go library (`package converters`).
 *   **Stream Processing**: capable of processing data streams without loading entire files into memory.
+
+## Installation
+
+Install `mksqlite` as a system-wide command:
+
+```bash
+./install.sh
+```
+
+Or install to a custom directory:
+
+```bash
+./install.sh --prefix /usr/local/bin
+```
 
 ## Area of Responsibility
 

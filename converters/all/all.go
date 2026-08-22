@@ -8,6 +8,7 @@ import (
 	_ "github.com/darianmavgo/mksqlite/converters/html"
 	_ "github.com/darianmavgo/mksqlite/converters/json"
 	_ "github.com/darianmavgo/mksqlite/converters/markdown"
+	_ "github.com/darianmavgo/mksqlite/converters/pdf"
 	_ "github.com/darianmavgo/mksqlite/converters/txt"
 	_ "github.com/darianmavgo/mksqlite/converters/zip"
 )

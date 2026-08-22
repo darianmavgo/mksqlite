@@ -35,6 +35,8 @@ func getDriverName(path string, isDir bool) (string, error) {
 		return "markdown", nil
 	case ".txt":
 		return "txt", nil
+	case ".pdf":
+		return "pdf", nil
 	}
 	return "", fmt.Errorf("unsupported file type: %s", ext)
 }

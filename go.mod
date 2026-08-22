@@ -3,6 +3,7 @@ module github.com/darianmavgo/mksqlite
 go 1.25.0
 
 require (
+	github.com/dslipak/pdf v0.0.2
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/magefile/mage v1.15.0
 	github.com/xuri/excelize/v2 v2.10.0
