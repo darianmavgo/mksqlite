@@ -138,6 +138,7 @@ func main() {
 
 	args := os.Args[1:]
 	logMode := false
+	multiSchemaMode := false
 
 	// Filter out --log flag
 	// Parse flags manually for simplicity
@@ -148,6 +149,8 @@ func main() {
 		switch {
 		case arg == "--log":
 			logMode = true
+		case arg == "--multischema":
+			multiSchemaMode = true
 		case arg == "--resume-path":
 			if i+1 < len(args) {
 				resumePath = args[i+1]
@@ -163,8 +166,8 @@ func main() {
 
 	if len(cleanArgs) < 1 {
 		fmt.Println("Usage:")
-		fmt.Println("  mksqlite [--log] [--resume-path <path>] <input_file> [output_db] # Convert to SQLite database")
-		fmt.Println("  mksqlite --sql <input_file> [output_file]                          # Export as SQL statements")
+		fmt.Println("  mksqlite [--log] [--multischema] [--resume-path <path>] <input_file> [output_db] # Convert to SQLite database")
+		fmt.Println("  mksqlite --sql [--multischema] <input_file> [output_file]                          # Export as SQL statements")
 		os.Exit(1)
 	}
 
@@ -189,7 +192,10 @@ func main() {
 			writer = os.Stdout
 		}
 
-		err := exportToSQL(ctx, inputPath, writer, nil)
+		config := &common.ConversionConfig{
+			MultiSchema: multiSchemaMode,
+		}
+		err := exportToSQL(ctx, inputPath, writer, config)
 		if err != nil {
 			fmt.Printf("Error exporting SQL: %v\n", err)
 			os.Exit(1)
@@ -204,7 +210,8 @@ func main() {
 		}
 
 		config := &common.ConversionConfig{
-			ResumePath: resumePath,
+			ResumePath:  resumePath,
+			MultiSchema: multiSchemaMode,
 		}
 
 		err := FileToSQLite(inputPath, outputPath, config, &converters.ImportOptions{LogErrors: logMode})
