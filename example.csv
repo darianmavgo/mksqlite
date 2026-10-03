@@ -1,0 +1,11 @@
+Statement,Header,Field Name,Field Value
+Statement,Data,Title,Transaction History
+Statement,Data,Period,"October 1, 2025 - October 1, 2026"
+Statement,Data,WhenGenerated,"2026-10-02, 11:36:25 EDT"
+Summary,Header,Field Name,Field Value
+Summary,Data,Base Currency,USD
+Summary,Data,Starting Cash,0.0
+Summary,Data,Change,-6435.969704068
+Summary,Data,Ending Cash,-6435.969704068
+Transaction History,Header,Date,Account,Description,Transaction Type,Symbol,Quantity,Price,Price Currency,Gross Amount ,Commission,Net Amount
+Transaction History,Data,2026-10-01,U***62325,Disbursement,Withdrawal,-,-,-,-,-5000.0,-,-5000.0

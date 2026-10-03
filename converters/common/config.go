@@ -9,6 +9,7 @@ type ConversionConfig struct {
 	Delimiter               rune   // Delimiter used for CSV/text parsing
 	TableName               string // Name of the table
 	AdvancedHeaderDetection bool
+	MultiSchema             bool   // Enable multi-schema processing (e.g. for CSV)
 	Verbose                 bool   // Enable detailed logging
 	InputPath               string // Path to the input file or directory
 	ResumePath              string // Path to resume processing from (for filesystem)
