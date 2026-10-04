@@ -1,0 +1,9 @@
+Report Date,2023-01-01
+Author,John Doe
+Department,Sales
+Status,Final
+
+ID,Name,Amount,Date
+1,Item A,100,2023-01-01
+2,Item B,200,2023-01-02
+3,Item C,150,2023-01-03

@@ -94,47 +94,16 @@ func NewCSVConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*C
 	reader.FieldsPerRecord = -1 // Allow variable number of fields
 
 	var headers []string
-	var bufferedRows [][]string
 
-	if config.AdvancedHeaderDetection {
-		var scanRows [][]string
-		// Read up to 10 rows for assessment
-		for i := 0; i < 10; i++ {
-			row, err := reader.Read()
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				return nil, fmt.Errorf("failed to read CSV row for assessment: %w", err)
-			}
-			scanRows = append(scanRows, row)
+	// We simply read the first row to act as headers.
+	h, err := reader.Read()
+	if err != nil {
+		if err == io.EOF {
+			return nil, fmt.Errorf("CSV file is empty")
 		}
-
-		if len(scanRows) > 0 {
-			idx := common.AssessHeaderRow(scanRows, 10)
-			if idx >= 0 && idx < len(scanRows) {
-				headers = scanRows[idx]
-				if idx+1 < len(scanRows) {
-					bufferedRows = scanRows[idx+1:]
-				}
-			} else {
-				headers = scanRows[0]
-				if len(scanRows) > 1 {
-					bufferedRows = scanRows[1:]
-				}
-			}
-		}
-	} else {
-		// Default behavior: First row is header
-		h, err := reader.Read()
-		if err != nil {
-			if err == io.EOF {
-				return nil, fmt.Errorf("CSV file is empty")
-			}
-			return nil, fmt.Errorf("failed to read CSV headers: %w", err)
-		}
-		headers = h
+		return nil, fmt.Errorf("failed to read CSV headers: %w", err)
 	}
+	headers = h
 
 	// Sanitize headers
 	sanitizedHeaders := common.GenColumnNames(headers)
@@ -148,7 +117,6 @@ func NewCSVConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*C
 
 	return &CSVConverter{
 		headers:      sanitizedHeaders,
-		bufferedRows: bufferedRows,
 		csvReader:    reader,
 		Config:       *config,
 		timeout:      timeout,
@@ -173,8 +141,8 @@ func (c *CSVConverter) GetColumnTypes(tableName string) []string {
 	if tableName != c.Config.TableName {
 		return nil
 	}
-	// Use buffered rows for inference
-	return common.InferColumnTypes(c.bufferedRows, len(c.headers))
+	// For RowProvider compatibility we default to strings.
+	return common.GenColumnTypes(c.headers)
 }
 
 // padRow pads or truncates the row to match the target length.
@@ -229,25 +197,6 @@ func (c *CSVConverter) ScanRows(ctx context.Context, tableName string, yield fun
 			}
 		}
 
-		// Send buffered rows first
-		for _, row := range c.bufferedRows {
-			row = padRow(row, len(c.headers))
-
-			wrapper := rowWrapperPool.Get().(*rowWrapper)
-			if cap(wrapper.values) < len(row) {
-				wrapper.values = make([]interface{}, len(row))
-			} else {
-				wrapper.values = wrapper.values[:len(row)]
-			}
-
-			for i, val := range row {
-				wrapper.values[i] = val
-			}
-			if !send(rowOrError{row: wrapper.values, wrapper: wrapper}) {
-				return
-			}
-		}
-
 		for {
 			row, err := reader.Read()
 			if err != nil {
@@ -256,12 +205,10 @@ func (c *CSVConverter) ScanRows(ctx context.Context, tableName string, yield fun
 				}
 				// Send error to consumer
 				send(rowOrError{err: fmt.Errorf("failed to read CSV row: %w", err)})
-				// Continue reading next row ?? Usually error is fatal or we stop.
-				// For CSV, Read() error usually stops.
 				return
 			}
 
-			// Ensure row has the same number of columns as headers
+			// If scanning via RowProvider (e.g. for fallback or tests), pad row to match the first row's headers
 			row = padRow(row, len(c.headers))
 
 			wrapper := rowWrapperPool.Get().(*rowWrapper)
@@ -314,39 +261,49 @@ func (c *CSVConverter) ScanRows(ctx context.Context, tableName string, yield fun
 }
 
 // ConvertToSQL implements StreamConverter for CSV files (outputs SQL to writer).
-// It uses concurrency to pipeline reading and writing.
+// It processes the stream sequentially, discovering tables dynamically when row lengths change,
+// without needing any lookaheads. Caps at 10 tables to prevent runaway table creation on bad data.
 func (c *CSVConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error {
 	if c.csvReader == nil {
 		return fmt.Errorf("CSV reader is not initialized")
 	}
 
-	// Use buffered writer to reduce system calls
-	// Use buffered writer to reduce system calls
 	bw := bufio.NewWriter(writer)
 	defer bw.Flush()
-	writer = bw
-	// Get column types
-	colTypes := c.GetColumnTypes(c.Config.TableName)
 
-	// Write CREATE TABLE statement
-	createTableSQL := common.GenCreateTableSQLWithTypes(c.Config.TableName, c.headers, colTypes)
-	if _, err := fmt.Fprintf(writer, "%s;\n\n", createTableSQL); err != nil {
-		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
+	type tableState struct {
+		TableName string
+		Headers   []string
+		ColLen    int
 	}
 
-	// Channel to pipeline reading and writing
-	rowsCh := make(chan []string, 100)
-	errCh := make(chan error, 1)
+	var currentTable *tableState
+	tableCount := 0
 
-	// Producer goroutine
+	// Initialize the first table with the headers already read in Open
+	currentTable = &tableState{
+		TableName: c.Config.TableName,
+		Headers:   c.headers,
+		ColLen:    len(c.headers), // Note: len(c.headers) might be sanitized, but it should match original length
+	}
+
+	// Create the first table
+	colTypes := common.GenColumnTypes(currentTable.Headers)
+	createTableSQL := common.GenCreateTableSQLWithTypes(currentTable.TableName, currentTable.Headers, colTypes)
+	if _, err := fmt.Fprintf(bw, "%s;\n\nBEGIN TRANSACTION;\n", createTableSQL); err != nil {
+		return fmt.Errorf("failed to write CREATE TABLE: %w", err)
+	}
+	tableCount++
+
+	type rowOrError struct {
+		row []string
+		err error
+	}
+
+	rowsCh := make(chan rowOrError, 100)
+
 	go func() {
 		defer close(rowsCh)
-
-		// Send buffered rows
-		for _, row := range c.bufferedRows {
-			row = padRow(row, len(c.headers))
-			rowsCh <- row
-		}
 
 		for {
 			row, err := c.csvReader.Read()
@@ -354,55 +311,108 @@ func (c *CSVConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error
 				if err == io.EOF {
 					break
 				}
-				errCh <- fmt.Errorf("failed to read CSV row: %w", err)
+				rowsCh <- rowOrError{err: err}
 				return
 			}
-
-			// Ensure row has the same number of columns as sanitized headers
-			row = padRow(row, len(c.headers))
-
-			rowsCh <- row
+			rowsCh <- rowOrError{row: row}
 		}
 	}()
 
-	// Consumer (Main Thread)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case row, ok := <-rowsCh:
+		case item, ok := <-rowsCh:
 			if !ok {
-				goto Done
+				if currentTable != nil {
+					if _, err := io.WriteString(bw, "COMMIT;\n\n"); err != nil {
+						return err
+					}
+				}
+				return bw.Flush()
 			}
-			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (", c.Config.TableName); err != nil {
+			if item.err != nil {
+				return fmt.Errorf("failed to read CSV row: %w", item.err)
+			}
+
+			row := item.row
+
+			// Ignore empty rows completely
+			isEmpty := true
+			for _, col := range row {
+				if strings.TrimSpace(col) != "" {
+					isEmpty = false
+					break
+				}
+			}
+			if isEmpty {
+				continue
+			}
+
+			rowLen := len(row)
+			if rowLen != currentTable.ColLen {
+				if tableCount < 10 {
+					// We encountered a new length and haven't hit the cap, so we start a new table.
+					// This row becomes the headers for the new table.
+					tableName := fmt.Sprintf("%s_%d", c.Config.TableName, tableCount)
+					tableCount++
+
+					sanitizedHeaders := common.GenColumnNames(row)
+					newColTypes := common.GenColumnTypes(sanitizedHeaders)
+
+					newCreateTableSQL := common.GenCreateTableSQLWithTypes(tableName, sanitizedHeaders, newColTypes)
+
+					// Write transaction commit for previous table
+					if _, err := io.WriteString(bw, "COMMIT;\n\n"); err != nil {
+						return err
+					}
+
+					if _, err := fmt.Fprintf(bw, "%s;\n\nBEGIN TRANSACTION;\n", newCreateTableSQL); err != nil {
+						return fmt.Errorf("failed to write CREATE TABLE: %w", err)
+					}
+
+					currentTable = &tableState{
+						TableName: tableName,
+						Headers:   sanitizedHeaders,
+						ColLen:    rowLen,
+					}
+					continue // The header row is not inserted as data
+				} else {
+					// Cap reached. Pad or truncate to fit the current table (the 10th table)
+					row = padRow(row, currentTable.ColLen)
+				}
+			}
+
+			// Generate and insert the data row
+			if _, err := fmt.Fprintf(bw, "INSERT INTO %s (", currentTable.TableName); err != nil {
 				return fmt.Errorf("failed to write INSERT start: %w", err)
 			}
 
 			// Write column names
-			for i, header := range c.headers {
+			for i, header := range currentTable.Headers {
 				if i > 0 {
-					if _, err := writer.Write([]byte(", ")); err != nil {
+					if _, err := bw.Write([]byte(", ")); err != nil {
 						return fmt.Errorf("failed to write column separator: %w", err)
 					}
 				}
-				if _, err := fmt.Fprintf(writer, "%s", header); err != nil {
+				if _, err := bw.WriteString(header); err != nil {
 					return fmt.Errorf("failed to write column name: %w", err)
 				}
 			}
 
-			if _, err := fmt.Fprintf(writer, ") VALUES ("); err != nil {
+			if _, err := bw.WriteString(") VALUES ("); err != nil {
 				return fmt.Errorf("failed to write VALUES start: %w", err)
 			}
 
 			// Write values
 			for i, val := range row {
 				if i > 0 {
-					if _, err := io.WriteString(writer, ", "); err != nil {
+					if _, err := io.WriteString(bw, ", "); err != nil {
 						return fmt.Errorf("failed to write value separator: %w", err)
 					}
 				}
 
-				if _, err := io.WriteString(writer, "'"); err != nil {
+				if _, err := io.WriteString(bw, "'"); err != nil {
 					return fmt.Errorf("failed to write value start: %w", err)
 				}
 
@@ -410,36 +420,27 @@ func (c *CSVConverter) ConvertToSQL(ctx context.Context, writer io.Writer) error
 				last := 0
 				for j := 0; j < len(val); j++ {
 					if val[j] == '\'' {
-						if _, err := io.WriteString(writer, val[last:j+1]); err != nil {
+						if _, err := io.WriteString(bw, val[last:j+1]); err != nil {
 							return fmt.Errorf("failed to write value chunk: %w", err)
 						}
-						if _, err := io.WriteString(writer, "'"); err != nil {
+						if _, err := io.WriteString(bw, "'"); err != nil {
 							return fmt.Errorf("failed to write escape quote: %w", err)
 						}
 						last = j + 1
 					}
 				}
-				if _, err := io.WriteString(writer, val[last:]); err != nil {
+				if _, err := io.WriteString(bw, val[last:]); err != nil {
 					return fmt.Errorf("failed to write value end: %w", err)
 				}
 
-				if _, err := io.WriteString(writer, "'"); err != nil {
+				if _, err := io.WriteString(bw, "'"); err != nil {
 					return fmt.Errorf("failed to write value end quote: %w", err)
 				}
 			}
 
-			if _, err := writer.Write([]byte(");\n")); err != nil {
+			if _, err := bw.Write([]byte(");\n")); err != nil {
 				return fmt.Errorf("failed to write statement end: %w", err)
 			}
 		}
-	}
-Done:
-
-	// Check for producer error
-	select {
-	case err := <-errCh:
-		return err
-	default:
-		return bw.Flush()
 	}
 }
