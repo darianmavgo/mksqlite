@@ -50,8 +50,9 @@ func TestCSVDelimiterDetection(t *testing.T) {
 				t.Errorf("Detected delimiter %q, want %q", c.Config.Delimiter, tt.expected)
 			}
 
-			if len(c.headers) != tt.cols {
-				t.Errorf("Detected %d headers, want %d", len(c.headers), tt.cols)
+			headers := c.GetHeaders(CSVTB)
+			if len(headers) != tt.cols {
+				t.Errorf("Detected %d headers, want %d", len(headers), tt.cols)
 			}
 		})
 	}
