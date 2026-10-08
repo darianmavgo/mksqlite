@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/darianmavgo/mksqlite/converters"
 	"github.com/darianmavgo/mksqlite/converters/common"
@@ -319,9 +318,26 @@ func (e *ExcelConverter) ConvertToSQL(ctx context.Context, writer io.Writer) err
 				}
 
 				// Escape single quotes by doubling them
-				escapedVal := strings.ReplaceAll(strVal, "'", "''")
-				if _, err := fmt.Fprintf(bw, "'%s'", escapedVal); err != nil {
-					return fmt.Errorf("failed to write value: %w", err)
+				if _, err := bw.WriteString("'"); err != nil {
+					return fmt.Errorf("failed to write value start: %w", err)
+				}
+				last := 0
+				for j := 0; j < len(strVal); j++ {
+					if strVal[j] == '\'' {
+						if _, err := bw.WriteString(strVal[last : j+1]); err != nil {
+							return fmt.Errorf("failed to write value chunk: %w", err)
+						}
+						if _, err := bw.WriteString("'"); err != nil {
+							return fmt.Errorf("failed to write escape quote: %w", err)
+						}
+						last = j + 1
+					}
+				}
+				if _, err := bw.WriteString(strVal[last:]); err != nil {
+					return fmt.Errorf("failed to write value end: %w", err)
+				}
+				if _, err := bw.WriteString("'"); err != nil {
+					return fmt.Errorf("failed to write value end quote: %w", err)
 				}
 			}
 
