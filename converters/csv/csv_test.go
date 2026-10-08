@@ -186,6 +186,12 @@ func TestCSVConvertToSQL(t *testing.T) {
 	if !strings.Contains(sqlOutput, "INSERT INTO tb0") {
 		t.Error("Expected INSERT statement in SQL output")
 	}
+	if !strings.Contains(sqlOutput, "BEGIN TRANSACTION;") {
+		t.Error("Expected BEGIN TRANSACTION statement in SQL output")
+	}
+	if !strings.Contains(sqlOutput, "COMMIT;") {
+		t.Error("Expected COMMIT statement in SQL output")
+	}
 }
 
 func TestCSVParseCSV(t *testing.T) {
