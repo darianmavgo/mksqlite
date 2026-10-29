@@ -36,12 +36,12 @@ func TestLargeShakespeareCSV(t *testing.T) {
 	url := "https://huggingface.co/datasets/flwrlabs/shakespeare/resolve/main/shakespeare.csv"
 	resp, err := http.Get(url)
 	if err != nil {
-		t.Fatalf("Failed to fetch from HuggingFace: %v", err)
+		t.Skipf("Failed to fetch from HuggingFace: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Failed to fetch from HuggingFace: status %d", resp.StatusCode)
+		t.Skipf("Failed to fetch from HuggingFace: status %d", resp.StatusCode)
 	}
 
 	// Interrupt after 5MB (sufficient to test streaming without downloading 500MB)

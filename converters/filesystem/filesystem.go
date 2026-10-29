@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -176,7 +175,7 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 	}()
 
 	if c.timeout > 0 {
-		log.Printf("Filesystem scan idle timeout set to %v", c.timeout)
+		common.Logger.Printf("Filesystem scan idle timeout set to %v", c.timeout)
 	}
 
 	// WaitGroup for all active tasks (dirs and files)
@@ -201,7 +200,7 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 		go func() {
 			select {
 			case <-wdDone:
-				log.Printf("Scan halted due to inactivity timeout (%v) after %d files.", c.timeout, rowCount)
+				common.Logger.Printf("Scan halted due to inactivity timeout (%v) after %d files.", c.timeout, rowCount)
 				// Close the main doneCh to signal workers to stop
 				// Check if already closed to avoid panic
 				select {
@@ -231,7 +230,7 @@ func (c *FilesystemConverter) ScanRows(ctx context.Context, tableName string, yi
 
 				rowCount++
 				if time.Since(lastLog) > 2*time.Second {
-					log.Printf("Scanned %d files...", rowCount)
+					common.Logger.Printf("Scanned %d files...", rowCount)
 					lastLog = time.Now()
 				}
 				if err := yield(row, nil); err != nil {
@@ -292,7 +291,7 @@ func (c *FilesystemConverter) processDir(ctx context.Context, dirPath string, wg
 	<-sem
 
 	if err != nil {
-		log.Printf("Error reading directory %s: %v", dirPath, err)
+		common.Logger.Printf("Error reading directory %s: %v", dirPath, err)
 		return
 	}
 

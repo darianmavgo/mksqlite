@@ -1,6 +1,8 @@
 package common
 
 import (
+	"io"
+	"log"
 	"strings"
 )
 
@@ -46,3 +48,7 @@ func ColumnCount(line string, delimiter rune) int {
 	}
 	return strings.Count(line, string(delimiter)) + 1
 }
+
+// Logger receives diagnostic output from converters. It discards by default so
+// importing applications stay quiet; set it (e.g. to log.Default()) to see it.
+var Logger = log.New(io.Discard, "", log.LstdFlags)

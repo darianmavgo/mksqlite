@@ -36,7 +36,18 @@ type ImportOptions struct {
 // to the provided io.Writer.
 // If writer is an *os.File, it writes directly to that file to allow partial data persistence.
 // Otherwise, it uses a temporary file for construction and copies it to the writer.
+//
+// It stops cleanly (committing partial progress) on SIGINT/SIGTERM, which suits CLIs.
+// Libraries embedding mksqlite should call ImportToSQLiteContext instead.
 func ImportToSQLite(provider common.RowProvider, writer io.Writer, opts *ImportOptions) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return ImportToSQLiteContext(ctx, provider, writer, opts)
+}
+
+// ImportToSQLiteContext is ImportToSQLite driven by the caller's context: it installs no
+// signal handlers, and cancelling ctx stops the import after committing partial progress.
+func ImportToSQLiteContext(ctx context.Context, provider common.RowProvider, writer io.Writer, opts *ImportOptions) error {
 	var dbPath string
 	var useTemp bool = true
 
@@ -86,7 +97,7 @@ func ImportToSQLite(provider common.RowProvider, writer io.Writer, opts *ImportO
 	if opts != nil && opts.Verbose {
 		log.Printf("[MKSQLITE] Starting database population...")
 	}
-	err = populateDB(db, provider, opts)
+	err = populateDB(ctx, db, provider, opts)
 	db.Close() // Close database connection
 
 	if useTemp {
@@ -117,7 +128,7 @@ func ImportToSQLite(provider common.RowProvider, writer io.Writer, opts *ImportO
 }
 
 // populateDB handles the common logic of creating tables and inserting rows
-func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) error {
+func populateDB(ctx context.Context, db *sql.DB, provider common.RowProvider, opts *ImportOptions) error {
 	logErrors := opts != nil && opts.LogErrors
 
 	if logErrors {
@@ -190,10 +201,6 @@ func populateDB(db *sql.DB, provider common.RowProvider, opts *ImportOptions) er
 		}
 
 		rowCount := 0
-
-		// Setup signal handling context
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer cancel()
 
 		// Insert rows using streaming ScanRows
 		err = provider.ScanRows(ctx, tableName, func(row []interface{}, rowErr error) error {

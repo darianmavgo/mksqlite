@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -97,7 +96,7 @@ func NewZipConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*Z
 		if err != nil {
 			return nil, fmt.Errorf("failed to stat file: %w", err)
 		}
-		log.Printf("FastZip: Using fast path for file %s (size %d)", f.Name(), info.Size())
+		common.Logger.Printf("FastZip: Using fast path for file %s (size %d)", f.Name(), info.Size())
 		files, _, err = ParseCentralDirectoryFast(f, info.Size())
 		if err != nil {
 			return nil, fmt.Errorf("fast parsing failed: %w", err)
@@ -108,14 +107,14 @@ func NewZipConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*Z
 		if err != nil {
 			return nil, fmt.Errorf("failed to get size from reader: %w", err)
 		}
-		log.Printf("FastZip: Using fast path for SizableReaderAt (size %d)", size)
+		common.Logger.Printf("FastZip: Using fast path for SizableReaderAt (size %d)", size)
 		files, _, err = ParseCentralDirectoryFast(sa, size)
 		if err != nil {
 			return nil, fmt.Errorf("fast parsing failed: %w", err)
 		}
 	} else {
 		// 3. Fallback: stream to temp file
-		log.Println("FastZip: Input is stream, falling back to temp file download")
+		common.Logger.Println("FastZip: Input is stream, falling back to temp file download")
 		tempFile, err = os.CreateTemp("", "mksqlite-zip-*.zip")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create temp file: %w", err)

@@ -37,12 +37,12 @@ func TestHTMLStreamingFromR2(t *testing.T) {
 	url := "https://pub-a1c6b68deb9d48e1b5783f84723c93ec.r2.dev/sample_data/demo_mavgo_flight/BERKSHIRE%20HATHAWAY%20INC.html"
 	resp, err := http.Get(url)
 	if err != nil {
-		t.Fatalf("Failed to fetch from R2: %v", err)
+		t.Skipf("Failed to fetch from R2: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Failed to fetch from R2: status %d", resp.StatusCode)
+		t.Skipf("Failed to fetch from R2: status %d", resp.StatusCode)
 	}
 
 	failAt := int64(100)

@@ -3,8 +3,8 @@ package zip
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/darianmavgo/mksqlite/converters/common"
 	"io"
-	"log"
 	"time"
 )
 
@@ -227,7 +227,7 @@ func parseCDEntries(cdData []byte, numEntries uint64) ([]FastZipEntry, error) {
 		pos += 46 + int(fileNameLen) + int(extraLen) + int(commentLen)
 	}
 
-	log.Printf("FastZip: parsed %d entries", len(entries))
+	common.Logger.Printf("FastZip: parsed %d entries", len(entries))
 	return entries, nil
 }
 

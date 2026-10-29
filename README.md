@@ -36,6 +36,38 @@ Or install to a custom directory:
 ./install.sh --prefix /usr/local/bin
 ```
 
+## Use as a Go Library
+
+```bash
+go get github.com/darianmavgo/mksqlite
+```
+
+```go
+import (
+	"context"
+	"os"
+
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/common"
+	_ "github.com/darianmavgo/mksqlite/converters/all" // registers all format drivers (required)
+)
+
+provider, err := converters.AutoOpen(reader, &common.ConversionConfig{}) // sniffs csv/json/html/excel/pdf/zip/...
+if err != nil { /* ... */ }
+
+out, _ := os.Create("data.db")
+defer out.Close()
+err = converters.ImportToSQLiteContext(ctx, provider, out, nil)
+```
+
+Notes:
+- Without the `converters/all` blank import (or a specific driver import), `AutoOpen` fails with `unknown driver`.
+- To skip detection, use a format constructor directly, e.g. `csv.NewCSVConverter(r)`.
+- `ImportToSQLiteContext` is driven by your context and installs no signal handlers; `ImportToSQLite` stops on SIGINT/SIGTERM (CLI behavior).
+- Library output is silent by default; set `common.Logger = log.Default()` to see converter diagnostics.
+- SQLite is provided by `modernc.org/sqlite` (driver name `sqlite`).
+- See `integration/yfinance_test.go` for a complete consumer example (run with `go test ./integration -v`; skipped by `-short`).
+
 ## Area of Responsibility
 
 `mksqlite` is the **Ingestion Engine**. Its job is to take unstructured or semi-structured data from the "wild" (files, scrapes, spreadsheets) and normalize it into the universal structured format: SQLite. It bridges the gap between raw data files and SQL-capable tools.

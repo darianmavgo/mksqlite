@@ -1,7 +1,6 @@
 package common
 
 import (
-	"log"
 	"sync"
 	"time"
 )
@@ -84,7 +83,7 @@ func (w *Watchdog) Done() <-chan struct{} {
 
 func (w *Watchdog) close() {
 	w.once.Do(func() {
-		log.Printf("Watchdog timeout (%v) triggered.", w.timeout)
+		Logger.Printf("Watchdog timeout (%v) triggered.", w.timeout)
 		close(w.doneCh)
 	})
 }

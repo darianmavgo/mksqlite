@@ -37,12 +37,12 @@ func TestMarkdownStreamingFromR2(t *testing.T) {
 	url := "https://pub-a1c6b68deb9d48e1b5783f84723c93ec.r2.dev/sample_data/demo_mavgo_flight/Expenses.csv" // using any file for stream interrupt test
 	resp, err := http.Get(url)
 	if err != nil {
-		t.Fatalf("Failed to fetch from R2: %v", err)
+		t.Skipf("Failed to fetch from R2: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Failed to fetch from R2: status %d", resp.StatusCode)
+		t.Skipf("Failed to fetch from R2: status %d", resp.StatusCode)
 	}
 
 	// Trigger failure at ~50% of content length

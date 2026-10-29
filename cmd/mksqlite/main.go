@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -132,6 +133,9 @@ func exportToSQL(ctx context.Context, inputPath string, writer io.Writer, config
 }
 
 func main() {
+	// The CLI wants converter diagnostics; the library discards them by default.
+	common.Logger = log.Default()
+
 	// Setup global context for cancellation
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

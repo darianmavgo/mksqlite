@@ -21,12 +21,12 @@ func TestCSVConvertFromURL(t *testing.T) {
 
 	resp, err := http.Get(url)
 	if err != nil {
-		t.Fatalf("Failed to fetch URL: %v", err)
+		t.Skipf("Failed to fetch URL: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Failed to fetch URL, status code: %d", resp.StatusCode)
+		t.Skipf("Failed to fetch URL, status code: %d", resp.StatusCode)
 	}
 
 	converter, err := NewCSVConverter(resp.Body)
