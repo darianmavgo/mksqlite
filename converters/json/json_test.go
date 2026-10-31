@@ -91,6 +91,58 @@ func TestJSONArray(t *testing.T) {
 	}
 }
 
+func TestJSONColumnar(t *testing.T) {
+	jsonContent := `{
+        "Open": {"0": 100.5, "1": 101.2},
+        "Close": {"0": 102.3, "1": 103.4},
+        "Volume": {"0": 1000, "1": 1500}
+    }`
+
+	reader := strings.NewReader(jsonContent)
+	conv, err := NewJSONConverter(reader)
+	if err != nil {
+		t.Fatalf("Failed to create converter: %v", err)
+	}
+
+	tables := conv.GetTableNames()
+	if len(tables) != 1 || tables[0] != "jsontb0" {
+		t.Fatalf("Expected 1 table 'jsontb0', got %v", tables)
+	}
+
+	headers := conv.GetHeaders("jsontb0")
+	// Expected to be sorted alphabetically and lowercased by GenColumnNames: close, open, volume
+	if len(headers) != 3 {
+		t.Fatalf("Expected 3 headers, got %v", headers)
+	}
+	if headers[0] != "close" || headers[1] != "open" || headers[2] != "volume" {
+		t.Errorf("Headers mismatch: %v", headers)
+	}
+
+	var rows [][]interface{}
+	err = conv.ScanRows(context.Background(), "jsontb0", func(row []interface{}, err error) error {
+		if err != nil {
+			return err
+		}
+		rows = append(rows, row)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ScanRows failed: %v", err)
+	}
+
+	if len(rows) != 2 {
+		t.Fatalf("Expected 2 rows, got %d", len(rows))
+	}
+	// Row 0 values for "0": Close=102.3, Open=100.5, Volume=1000
+	if rows[0][0] != 102.3 || rows[0][1] != 100.5 || rows[0][2] != float64(1000) {
+		t.Errorf("Row 0 data mismatch: %v", rows[0])
+	}
+	// Row 1 values for "1": Close=103.4, Open=101.2, Volume=1500
+	if rows[1][0] != 103.4 || rows[1][1] != 101.2 || rows[1][2] != float64(1500) {
+		t.Errorf("Row 1 data mismatch: %v", rows[1])
+	}
+}
+
 func TestJSONObject(t *testing.T) {
 	jsonContent := `{
         "users": [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}],

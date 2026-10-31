@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -154,6 +155,15 @@ func NewJSONConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*
 			return nil, fmt.Errorf("expected closing '}'")
 		}
 
+		if isColumnarData(c.objData) {
+			rows := transformColumnarToRows(c.objData)
+			if rows != nil {
+				c.objData = map[string]interface{}{
+					"jsontb0": rows,
+				}
+			}
+		}
+
 		// Analyze for tables
 		var names []string
 		for k, v := range c.objData {
@@ -191,6 +201,82 @@ func NewJSONConverterWithConfig(r io.Reader, config *common.ConversionConfig) (*
 	}
 
 	return c, nil
+}
+
+func isColumnarData(objData map[string]interface{}) bool {
+	if len(objData) <= 1 {
+		return false
+	}
+	var rowCount int
+	var expectedKeys []string
+	first := true
+
+	for _, v := range objData {
+		m, ok := v.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		if first {
+			rowCount = len(m)
+			if rowCount == 0 {
+				return false
+			}
+			expectedKeys = make([]string, 0, rowCount)
+			for k := range m {
+				expectedKeys = append(expectedKeys, k)
+			}
+			first = false
+		} else {
+			if len(m) != rowCount {
+				return false
+			}
+			for _, k := range expectedKeys {
+				if _, exists := m[k]; !exists {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func transformColumnarToRows(objData map[string]interface{}) []interface{} {
+	var columns []string
+	for k := range objData {
+		columns = append(columns, k)
+	}
+	sort.Strings(columns)
+
+	if len(columns) == 0 {
+		return nil
+	}
+
+	firstColMap := objData[columns[0]].(map[string]interface{})
+	var rowKeys []string
+	for k := range firstColMap {
+		rowKeys = append(rowKeys, k)
+	}
+
+	sort.Slice(rowKeys, func(i, j int) bool {
+		vi, erri := strconv.Atoi(rowKeys[i])
+		vj, errj := strconv.Atoi(rowKeys[j])
+		if erri == nil && errj == nil {
+			return vi < vj
+		}
+		return rowKeys[i] < rowKeys[j]
+	})
+
+	var rows []interface{}
+	for _, rk := range rowKeys {
+		rowMap := make(map[string]interface{})
+		for _, col := range columns {
+			colMap := objData[col].(map[string]interface{})
+			rowMap[col] = colMap[rk]
+		}
+		rows = append(rows, rowMap)
+	}
+
+	return rows
 }
 
 func extractRawHeaders(row map[string]interface{}) []string {
