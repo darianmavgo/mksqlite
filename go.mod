@@ -5,12 +5,15 @@ go 1.25.0
 require (
 	github.com/dslipak/pdf v0.0.2
 	github.com/magefile/mage v1.15.0
+	github.com/tursodatabase/libsql-client-go v0.0.0-20260528064733-9d5d30a29a60
 	github.com/xuri/excelize/v2 v2.10.0
 	golang.org/x/net v0.49.0
 	modernc.org/sqlite v1.44.2
 )
 
 require (
+	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
+	github.com/coder/websocket v1.8.12 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/pprof v0.0.0-20251007162407-5df77e3f7d1d // indirect

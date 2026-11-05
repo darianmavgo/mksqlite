@@ -68,6 +68,29 @@ Notes:
 - SQLite is provided by `modernc.org/sqlite` (driver name `sqlite`).
 - See `integration/yfinance_test.go` for a complete consumer example (run with `go test ./integration -v`; skipped by `-short`).
 
+## Streaming to Turso
+
+Converters that implement `common.StreamConverter` can stream their SQL straight into a remote
+[Turso](https://turso.tech) database, with no local file. `sink/` holds the shared pieces (statement
+splitter, batching `Writer`, `Executor` interface); `sink/turso` is the Turso destination.
+
+```go
+import (
+	"github.com/darianmavgo/mksqlite/converters"
+	"github.com/darianmavgo/mksqlite/converters/common"
+	_ "github.com/darianmavgo/mksqlite/converters/all"
+	"github.com/darianmavgo/mksqlite/sink"
+	"github.com/darianmavgo/mksqlite/sink/turso"
+)
+
+p, _ := converters.Open("csv", r, &common.ConversionConfig{TableName: "prices"})
+db, _ := turso.OpenFromEnv() // TURSO_DATABASE_URL, TURSO_AUTH_TOKEN
+err := turso.Stream(ctx, db, p.(common.StreamConverter), sink.Options{IfExists: sink.Replace})
+```
+
+`IfExists` is `sink.Fail` (default), `sink.Replace` (drop then create) or `sink.Append` (`CREATE TABLE IF NOT EXISTS`).
+Only `sink/turso` imports the libsql driver. See `integration/turso_test.go` (skipped unless the env vars are set).
+
 ## Area of Responsibility
 
 `mksqlite` is the **Ingestion Engine**. Its job is to take unstructured or semi-structured data from the "wild" (files, scrapes, spreadsheets) and normalize it into the universal structured format: SQLite. It bridges the gap between raw data files and SQL-capable tools.
